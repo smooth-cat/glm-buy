@@ -1,0 +1,1 @@
+uv run python -m 'src/glm_buy/main.py'

@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "GLM 抢购主程序",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "glm_buy.main",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "验证码演示",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "glm_buy.verify.demo",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "验证码识别器测试（需手动填参数）",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "glm_buy.verify.solver",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "args": [
+        "logs/captcha_debug.png",
+        "请依次点击：我 爱 心"
+      ],
+      "justMyCode": false
+    },
+    {
+      "name": "调试当前文件",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

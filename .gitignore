@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# uv
+.venv/
+
+# Playwright
+browser_profile/
+
+# Logs
+logs/
+
+# Captcha debug images
+captcha_debug*.png
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json

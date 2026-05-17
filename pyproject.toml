@@ -1,0 +1,21 @@
+[project]
+name = "glm-buy"
+version = "0.1.0"
+description = "GLM Coding Plan Pro auto-purchase sniper (Python + Playwright)"
+requires-python = ">=3.12"
+dependencies = [
+    "playwright>=1.50",
+    "loguru>=0.7",
+    "httpx>=0.28",
+    "rapidocr-onnxruntime>=1.4",
+    "opencv-python>=4.8",
+    "paddlepaddle>=3.3.1",
+    "paddleocr>=3.5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glm_buy"]
