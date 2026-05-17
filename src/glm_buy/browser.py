@@ -46,6 +46,7 @@ class BrowserManager:
       target_hour: int = 10,
       target_minute: int = 0,
       target_second: int = 0,
+      viewport: dict | None = None,  # {"width": 1728, "height": 1000}，None=自动检测屏幕
   ) -> None:
     """
     初始化浏览器管理器.
@@ -55,13 +56,15 @@ class BrowserManager:
       user_data_dir:  浏览器用户数据目录（保存 Cookie/登录态）
       purchase_url:   购买页面 URL
       target_hour/minute/second: 目标抢购时间（用于判断 rush window）
+      viewport:       浏览器窗口大小，None 时自动检测屏幕分辨率
     """
     self._headless = headless
-    self._user_data_dir = Path(user_data_dir).resolve()  # 转绝对路径
+    self._user_data_dir = Path(user_data_dir).resolve()
     self._purchase_url = purchase_url
     self._target_hour = target_hour
     self._target_minute = target_minute
     self._target_second = target_second
+    self._viewport = viewport
 
     # 运行时对象（初始为 None，start() 后赋值）
     self._playwright = None          # Playwright 实例
@@ -143,12 +146,22 @@ class BrowserManager:
       # launch_persistent_context:
       #   - 持久化上下文会保存 Cookie/登录态到 user_data_dir
       #   - 下次启动时自动恢复，无需重新登录
+      # 自动检测或使用配置的 viewport
+      if self._viewport is None:
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        vp_w = root.winfo_screenwidth()
+        vp_h = root.winfo_screenheight() - 100  # 留出菜单栏
+        root.destroy()
+        self._viewport = {"width": vp_w, "height": vp_h}
+
       self._context = await asyncio.wait_for(
           self._playwright.chromium.launch_persistent_context(
-              user_data_dir=str(self._user_data_dir),  # 持久化目录
-              headless=self._headless,                  # 是否无头
-              viewport={"width": 1280, "height": 800},  # 窗口大小
-              locale="zh-CN",                            # 中文界面
+              user_data_dir=str(self._user_data_dir),
+              headless=self._headless,
+              viewport=self._viewport,
+              locale="zh-CN",
               args=[
                   "--no-first-run",                    # 跳过首次运行向导
                   "--no-default-browser-check",        # 跳过默认浏览器检查
