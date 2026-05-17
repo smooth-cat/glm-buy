@@ -92,20 +92,26 @@ CAPTCHA_SELECTORS = {
     # 腾讯云验证码演示页
     "demo_page_url": "https://cloud.tencent.com/product/captcha",
     # 验证码类型选择容器
-    "box_container": ".captcha-box-second",        
+    "box_container": ".captcha-box-second",
     # 文字点选验证的标签文本
-    "text_verify_tab": "文字点选验证",               
+    "text_verify_tab": "文字点选验证",
     # 立即体验按钮文本
-    "experience_btn": "立即体验",                    
-              
+    "experience_btn": "立即体验",
+
 
     # 验证码交互
-    # 刷新按钮
-    "action_refresh": ".tc-action--refresh",        
-    # 操作区容器
-    "opera": ".tc-opera",                           
-    # 加载中的状态类
-    "opera_loading": ".tc-opera .show-loading",     
     # 确认按钮文字
-    "confirm_btn_text": "确定",                      
+    "confirm_btn_text": "确定",
+
+    # # 刷新按钮
+    # "action_refresh": ".tc-action--refresh",
+    # # 操作区容器
+    # "opera": ".tc-opera",
+    # # 加载中的状态类
+    # "opera_loading": ".tc-opera .show-loading",
+
+
+    "action_refresh": "[alt='刷新验证']",
+    "opera": ".tencent-captcha-dy__image-area",
+    "opera_loading": ".tencent-captcha-dy__verify-status-img--loading"
 }

@@ -76,7 +76,8 @@ class BrowserManager:
     self._auth_header: str | None = None          # Authorization 请求头
     self._product_id: str | None = None           # 要注入的 productId
 
-    # 状态标志（由 scheduler 控制）
+    # 事件标志
+    self._page_refreshed: bool = False            # 页面是否被刷新（需重新抢购）
     self._confirm_sold_out: bool = False          # 是否确认售罄（停止拦截）
     self._order_created: bool = False             # 订单是否已创建（停止点击）
     self._force_pay_dialog_called: bool = False   # 是否已触发支付弹窗
@@ -128,6 +129,14 @@ class BrowserManager:
   @force_pay_dialog_called.setter
   def force_pay_dialog_called(self, value: bool) -> None:
     self._force_pay_dialog_called = value
+
+  @property
+  def page_refreshed(self) -> bool:
+    return self._page_refreshed
+
+  @page_refreshed.setter
+  def page_refreshed(self, value: bool) -> None:
+    self._page_refreshed = value
 
   # ==================== 浏览器生命周期 ====================
 
@@ -186,6 +195,8 @@ class BrowserManager:
 
     # 第三步：创建新标签页并设置请求拦截
     self._page = await self._context.new_page()
+    # 监听页面刷新：每次 load 事件标记需要重新抢购
+    self._page.on("load", lambda: setattr(self, "_page_refreshed", True))
     await self._setup_routes()       # 设置 API 响应拦截
     await self._setup_auth_capture()  # 设置 Authorization 头捕获
 

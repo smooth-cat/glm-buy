@@ -173,11 +173,10 @@ async def solve_captcha(page, mouse, solver, max_attempts: int = 3) -> bool:
     clicked = await _recognize_and_click(
         solver, mouse, captcha_screenshot, prompt_text, offset_x, offset_y
     )
+    need_refresh = False
     if clicked:
       await _click_confirm_button(page, mouse)
-      # 检查是否验证错误（点击位置不对导致失败）
       await asyncio.sleep(1)
-      # 在主页面和所有 iframe 中检查验证错误提示
       body = ""
       for f in [page] + [f for f in page.frames if f != page]:
         try:
@@ -185,10 +184,16 @@ async def solve_captcha(page, mouse, solver, max_attempts: int = 3) -> bool:
         except Exception:
           pass
       if "验证错误" in body or "请重试" in body:
-        logger.info("验证错误，刷新验证码重试...")
+        logger.info("验证错误，需要刷新重试")
+        need_refresh = True
       else:
         return True
-      logger.info("识别失败，点击刷新按钮...")
+    else:
+      logger.info("OCR 未匹配到目标文字，需要刷新重试")
+      need_refresh = True
+
+    if need_refresh and attempt < max_attempts:
+      logger.info("点击刷新按钮...")
       try:
         refresh_btn, _ = await _find_in_frames(page, S["action_refresh"])
         if refresh_btn:
@@ -279,10 +284,12 @@ async def _wait_captcha_loading(page) -> None:
     if not opera or not frame:
       await asyncio.sleep(2)
       return
-    await frame.locator(S["opera_loading"]).wait_for(state="attached", timeout=3000)
-    logger.debug("验证码加载中")
+    # visible: 兼容 DOM 创建 + display:none→flex 两种出现方式
+    await frame.locator(S["opera_loading"]).wait_for(state="visible", timeout=3000)
+    logger.info("验证码加载中")
+    # hidden: 兼容 DOM 删除 + display:flex→none 两种消失方式
     await frame.locator(S["opera_loading"]).wait_for(state="hidden", timeout=10000)
-    logger.debug("验证码加载完成")
+    logger.info("验证码加载完成")
   except Exception as e:
     logger.debug(f"等待加载异常（回退 2s）: {e}")
     await asyncio.sleep(2)

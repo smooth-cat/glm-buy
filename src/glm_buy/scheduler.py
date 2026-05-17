@@ -393,6 +393,14 @@ class Scheduler:
     try:
       while self._snipe_active:
         # ---- 退出条件检查 ----
+        # 页面被刷新（手动或自动）→ 重新开始抢购
+        if self.browser and self.browser.page_refreshed:
+          self.browser.page_refreshed = False
+          logger.info("检测到页面刷新，重新开始抢购...")
+          self._snipe_active = False
+          self._is_running = False
+          return  # 退出循环，由 auto_snipe_on_ready 重新触发
+
         if self._confirmed_sold_out:
           logger.info("已确认售罄，停止抢购")
           break
@@ -451,7 +459,7 @@ class Scheduler:
                 self._modal_visible = False
                 continue
               logger.warning("验证码自动识别失败，等待手动处理...")
-              await async_notify("GLM 需要验证", "请手动完成验证码")
+              await async_notify("GLM 需要验证", "请手动完成验证码或刷新页面重试")
 
           break  # 支付弹窗 → 停止点击循环
 
