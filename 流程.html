@@ -12,13 +12,13 @@
   </style>
 </head>
 <body>
-  <h1>GLM Buy — 抢购流程图 v2</h1>
+  <h1>GLM Buy — 抢购流程图 v3</h1>
   <div class="mermaid">
 graph TD
     Start(["🚀 启动: uv run python -m glm_buy.main"]) --> Init[📋 初始化<br/>setup_logging / build_config / Scheduler]
     Init --> Browser["🌐 启动 Chromium<br/>BrowserManager.start()"]
     Browser --> BrowserDet["page.route 拦截 API<br/>page.on('load') 监听刷新<br/>page.goto 购买页面"]
-    BrowserDet --> Aux["🔧 DOMReader / Mouse<br/>时间校准 / PID 定期检查"]
+    BrowserDet --> Aux["🔧 DOMReader / Mouse<br/>CaptchaSolver 一次初始化<br/>时间校准 / PID 定期检查"]
 
     Aux --> CheckTime{"当前在<br/>抢购窗口?"}
     CheckTime -->|是| SnipeNow["⚡ 立即抢购 (延迟2s)"]
@@ -58,23 +58,26 @@ graph TD
     DetectModal -->|验证码| CaptchaSolve["🤖 solve_captcha()"]
 
     subgraph Captcha["验证码自动处理"]
-        CaptchaSolve --> C1["等待弹窗<br/>监控 .tc-opera"]
-        C1 --> C2["截图 .tc-bg-img"]
-        C2 --> C3["提取提示语"]
-        C3 --> C4["PaddleOCR 检测+识别"]
-        C4 --> C5{"拆字?"}
-        C5 -->|是| C5a["均分法拆字"]
-        C5a --> C6["逐框识别"]
-        C5 -->|否| C6
-        C6 --> C7{"匹配目标文字?"}
-        C7 -->|是| C8["🖱 依次点击文字"]
+        CaptchaSolve --> C1["轮询查找 S[opera] 元素<br/>0.5s/次 × 最多15s"]
+        C1 --> C1a["等元素 visible<br/>sleep appear_delay_ms"]
+        C1a --> C2["📸 _capture_captcha<br/>截图 S[opera] + 补 iframe 偏移"]
+        C2 --> C3["📝 _extract_prompt<br/>正则提取「请依次点击：X X X」"]
+        C3 --> C4["🔍 PaddleOCR 全图检测+识别"]
+        C4 --> C5["_split_merged()<br/>按宽高比均分多字框"]
+        C5 --> C6["_refine_split_positions()<br/>子区域 OCR 修正坐标"]
+        C6 --> C6a{"单字?"}
+        C6a -->|是| C6b["子区域 OCR → 精确框"]
+        C6a -->|多字| C6c["强制均分 + 各子区域 OCR"]
+        C6b --> C7
+        C6c --> C7{"_match_targets<br/>匹配目标文字?"}
+        C7 -->|是| C8["🖱 _recognize_and_click<br/>逐个点击文字"]
         C7 -->|否| C9["need_refresh=true"]
-        C8 --> C10["🖱 点击确定按钮"]
-        C10 --> C11{"验证错误/请重试?"}
+        C8 --> C10["🖱 _click_confirm_button<br/>点击确定按钮"]
+        C10 --> C11{"检查可见元素<br/>含「验证错误」「请重试」?"}
         C11 -->|是| C9
         C11 -->|否| COK["✅ 通过"]
-        C9 --> C12{"attempt < 3?"}
-        C12 -->|是| C13["点刷新按钮<br/>等 loading 消失"]
+        C9 --> C12{"attempt < max?"}
+        C12 -->|是| C13["点刷新按钮<br/>_wait_captcha_loading<br/>(检测 loading 当前状态)"]
         C13 --> C2
         C12 -->|否| CFail["❌ 失败 → 通知手动"]
     end
@@ -104,6 +107,7 @@ graph TD
     style Browser fill:#8844ff,stroke:#6622cc,color:#fff
     style PageRefresh fill:#ffaa00,stroke:#cc8800,color:#000
     style Restart fill:#ffaa00,stroke:#cc8800,color:#000
+    style C6 fill:#ffaa00,stroke:#cc8800,color:#000
   </div>
   <script>mermaid.initialize({startOnLoad:true,theme:'dark',securityLevel:'loose'});</script>
 </body>
