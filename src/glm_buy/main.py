@@ -31,6 +31,10 @@ async def main() -> None:
     logger.exception(f"运行异常: {e}")
   finally:
     if scheduler.browser:
+      # 抢购成功时保持浏览器一直打开，方便用户扫码
+      if scheduler._order_created:
+        logger.info("抢购成功！浏览器保持打开，请扫码后手动关闭...")
+        await asyncio.Event().wait()  # 永久阻塞
       await scheduler.browser.stop()
 
 

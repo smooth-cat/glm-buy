@@ -792,7 +792,16 @@ class Scheduler:
         logger.info("当前正是抢购时间! 立即开始!")
         self._is_running = True
         await self._start_snipe()
-        return  # 抢购完成后返回（run 函数只在到点瞬间运行一次核心战斗）
+        # 抢购成功后退出；否则（如页面刷新）等页面恢复后重新触发
+        if not self._order_created:
+          for _ in range(15):  # 最多等 30 秒
+            await asyncio.sleep(2)
+            await self.auto_recovery_check()
+            await self.auto_snipe_on_ready()
+            if self._order_created or self._is_running:
+              break
+        if not self._order_created:
+          return
 
     # 7. 打印配置信息
     plan_list = "，".join(

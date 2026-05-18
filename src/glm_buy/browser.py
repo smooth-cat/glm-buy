@@ -22,6 +22,7 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from loguru import logger
 from playwright.async_api import (
@@ -46,7 +47,7 @@ class BrowserManager:
       target_hour: int = 10,
       target_minute: int = 0,
       target_second: int = 0,
-      viewport: dict | None = None,  # {"width": 1728, "height": 1000}，None=自动检测屏幕
+      viewport: dict[str, int] | None = None,
   ) -> None:
     """
     初始化浏览器管理器.
@@ -64,7 +65,7 @@ class BrowserManager:
     self._target_hour = target_hour
     self._target_minute = target_minute
     self._target_second = target_second
-    self._viewport = viewport
+    self._viewport: dict[str, int] | None = viewport
 
     # 运行时对象（初始为 None，start() 后赋值）
     self._playwright = None          # Playwright 实例
@@ -165,11 +166,12 @@ class BrowserManager:
         root.destroy()
         self._viewport = {"width": vp_w, "height": vp_h}
 
+      viewport = self._viewport  # 赋值给局部变量，Pylance 可正确窄化类型
       self._context = await asyncio.wait_for(
           self._playwright.chromium.launch_persistent_context(
               user_data_dir=str(self._user_data_dir),
               headless=self._headless,
-              viewport=self._viewport,
+              viewport=viewport,  # type: ignore[arg-type]
               locale="zh-CN",
               args=[
                   "--no-first-run",                    # 跳过首次运行向导
@@ -195,14 +197,15 @@ class BrowserManager:
 
     # 第三步：创建新标签页并设置请求拦截
     self._page = await self._context.new_page()
-    # 监听页面刷新：每次 load 事件标记需要重新抢购
-    self._page.on("load", lambda: setattr(self, "_page_refreshed", True))
     await self._setup_routes()       # 设置 API 响应拦截
     await self._setup_auth_capture()  # 设置 Authorization 头捕获
 
     # 第四步：导航到购买页面
     logger.info("浏览器已启动，正在打开购买页面...")
-    await self._page.goto(self._purchase_url, wait_until="domcontentloaded")
+    await self._page.goto(self._purchase_url, wait_until="load")
+    # 注册刷新监听，并立即重置标志（goto 的 load 事件会在注册后触发）
+    self._page.on("load", lambda _: setattr(self, "_page_refreshed", True))
+    self._page_refreshed = False
     logger.info(f"当前 URL: {self._page.url}")
 
     # 处理限流页面：如果被重定向到 rate-limit，则跳回购买页

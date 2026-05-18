@@ -64,6 +64,8 @@ class DOMReader:
   def __init__(self, page: Page) -> None:
     """初始化，page 是 Playwright 的 Page 对象."""
     self._page = page
+    # 记录初始 QR 数量，只检测增量。-1 表示首次调用待建基线
+    self._last_qr_count = -1
 
   # ==================== 页面状态检测 ====================
 
@@ -316,24 +318,28 @@ class DOMReader:
       # ---- 检查是否为验证码弹窗 ----
       has_captcha = any(kw in text for kw in CAPTCHA_KEYWORDS)
       if not has_captcha:
-        # 文本没找到，再查 DOM 内的特定 class
         try:
-          captcha_el = await modal.locator(
+          els = await modal.locator(
               '[class*="captcha"], [class*="verify"], [class*="slider-"]'
-          ).count()
-          has_captcha = captcha_el > 0
+          ).all()
+          has_captcha = len(els) > 0
+          if has_captcha:
+            tags = [await e.evaluate("el => el.tagName + (el.className ? '.' + el.className.split(' ')[0] : '')") for e in els[:5]]
+            logger.info(f"验证码子元素: {tags}")
         except Exception:
           pass
 
       # ---- 检查是否为支付弹窗 ----
       has_payment = any(kw in text for kw in ["扫码", "支付", "付款"])
       if not has_payment:
-        # 文本没找到，查是否有 canvas（二维码）或 qr/pay 图片
         try:
-          qr_count = await modal.locator(
+          els = await modal.locator(
               'canvas, img[src*="qr"], img[src*="pay"]'
-          ).count()
-          has_payment = qr_count > 0
+          ).all()
+          has_payment = len(els) > 0
+          if has_payment:
+            tags = [await e.evaluate("el => '<' + el.tagName.toLowerCase() + '>' + (el.outerHTML || '').slice(0, 80)") for e in els[:5]]
+            logger.info(f"支付子元素: {tags}")
         except Exception:
           pass
 
@@ -346,14 +352,29 @@ class DOMReader:
 
   async def detect_qr_code(self) -> bool:
     """
-    检查页面任意位置是否出现了支付二维码.
-    用于确认抢购成功（二维码出现 = 订单已创建）.
+    检测可见弹窗内是否有新的支付二维码出现（仅检测增量，对应 JS 版 MutationObserver）.
+    搜索范围限定为可见弹窗，与 detect_modal 一致.
     """
     try:
-      count = await self._page.locator(
-          'canvas, img[src*="qr"], img[src*="pay"]'
-      ).count()
-      return count > 0
+      # 只在可见弹窗内搜索（与 detect_modal 相同范围）
+      modals = await self._page.locator(
+          '[class*="modal"], [class*="dialog"], [class*="popup"], [role="dialog"]'
+      ).all()
+      total = 0
+      for modal in modals:
+        if not await self._is_visible(modal):
+          continue
+        total += await modal.locator(
+            'canvas, img[src*="qr"], img[src*="pay"]'
+        ).count()
+
+      if self._last_qr_count == -1:
+        self._last_qr_count = total
+        return False
+      if total > self._last_qr_count:
+        self._last_qr_count = total
+        return True
+      return False
     except Exception:
       return False
 
