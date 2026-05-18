@@ -98,7 +98,8 @@
 
   /* 验证码弹窗 */
   .captcha-box { text-align: center; padding: 16px; }
-  .captcha-box .tc-bg-img { width: 300px; height: 200px; background: #2a2f4a; border-radius: 8px; margin: 0 auto; display: flex; align-items: center; justify-content: center; color: #8892b0; font-size: 14px; }
+  .captcha-box .tc-bg-img { background: #2a2f4a; border-radius: 8px; margin: 0 auto; display: inline-block; line-height: 0; }
+  .captcha-box .tc-bg-img img { display: block; border-radius: 8px; max-width: 340px; }
   .captcha-box .tc-opera { margin-top: 12px; }
 
   /* 腾讯云验证码模拟 */
@@ -212,6 +213,18 @@
   </div>
 </div>
 
+<!-- ====== 二次确认弹窗（订单确认）====== -->
+<div class="modal-overlay" id="confirmOrderModal" role="dialog">
+  <div class="modal-dialog" style="min-height:200px;">
+    <h3>订单确认</h3>
+    <div class="order-info" id="confirmOrderInfo"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btnCancelOrder">取消</button>
+      <button class="btn-confirm" id="btnConfirmOrder">确认购买</button>
+    </div>
+  </div>
+</div>
+
 <!-- ====== 验证码弹窗 ====== -->
 <div class="modal-overlay" id="captchaModal" role="dialog">
   <div class="modal-dialog" style="min-height:360px;">
@@ -219,11 +232,23 @@
     <p style="color:#8892b0;font-size:13px;text-align:center;margin-bottom:16px;">请完成下方验证后继续</p>
     <div class="captcha-box">
       <div class="tencent-captcha-dy__image-area" style="position:relative;">
-        <div class="tc-bg-img" id="captchaImage" style="width:300px;height:200px;display:flex;align-items:center;justify-content:center;color:#8892b0;font-size:14px;background:#2a2f4a;border-radius:8px;">
-          模拟验证码图片<br><small>（实际测试中截图后由 OCR 识别）</small>
+        <div class="tc-bg-img" id="captchaImage" style="position:relative;display:inline-block;background:#2a2f4a;border-radius:8px;line-height:0;">
+          <img src="captcha_test.png" alt="验证码" style="display:block;border-radius:8px;" id="captchaImg">
+          <canvas id="captchaClickCanvas" style="position:absolute;top:0;left:0;pointer-events:none;border-radius:8px;"></canvas>
+        </div>
+        <div class="tencent-captcha-dy__verify-status-img--loading" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(42,47,74,0.8);border-radius:8px;color:#8892b0;font-size:13px;">
+          🔄 加载中...
         </div>
       </div>
-      <div style="margin-top:12px;display:flex;align-items:center;justify-content:center;gap:12px;">
+      <div style="margin-top:8px;color:#ffcc00;font-size:14px;text-align:center;font-weight:bold;" id="captchaPrompt">
+        请依次点击：备 波 隘
+      </div>
+      <div id="captchaCoords" style="margin-top:4px;color:#8892b0;font-size:12px;text-align:center;">
+        字坐标: 备(75,79) 波(281,24) 隘(280,128) | 字大小 44×44px
+      </div>
+      <div id="captchaClickLog" style="margin-top:4px;color:#4d7cff;font-size:12px;text-align:center;min-height:18px;"></div>
+      <div id="captchaError" style="display:none;margin-top:6px;color:#ff4444;font-size:13px;text-align:center;font-weight:bold;"></div>
+      <div style="margin-top:8px;display:flex;align-items:center;justify-content:center;gap:12px;">
         <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%238892b0' stroke-width='2'%3E%3Cpath d='M1 4v6h6'/%3E%3Cpath d='M23 20v-6h-6'/%3E%3Cpath d='M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15'/%3E%3C/svg%3E" alt="刷新验证" style="cursor:pointer;width:28px;height:28px;" id="captchaRefresh">
         <span style="color:#8892b0;font-size:13px;">看不清？点击刷新</span>
       </div>
@@ -260,6 +285,7 @@ const state = {
   selectedPeriod: 'quarterly',
   soldOut: { lite: false, pro: false, max: false },
   orderPlaced: false,
+  pendingBuy: null,
 };
 
 const PRICES = {
@@ -323,8 +349,11 @@ document.querySelectorAll('.btn-primary').forEach(btn => {
     // 模拟 API 调用：订单预览
     await fetchOrderPreview(plan, period);
 
-    // 打开支付弹窗
-    showPaymentModal(plan, period);
+    // 第一步：弹出订单确认弹窗
+    state.pendingBuy = { plan, period };
+    document.getElementById('confirmOrderInfo').textContent =
+      `${PLAN_NAMES[plan]} - ${PERIOD_LABELS[period]} - ¥${PRICES[plan][period]}`;
+    document.getElementById('confirmOrderModal').classList.add('visible');
   });
 });
 
@@ -353,6 +382,19 @@ document.getElementById('btnConfirmPay').addEventListener('click', async () => {
   console.log('[支付] 订单已提交，显示扫描支付二维码');
 });
 
+// ==================== 二次确认弹窗 ====================
+document.getElementById('btnCancelOrder').addEventListener('click', () => {
+  document.getElementById('confirmOrderModal').classList.remove('visible');
+  state.pendingBuy = null;
+});
+
+document.getElementById('btnConfirmOrder').addEventListener('click', () => {
+  document.getElementById('confirmOrderModal').classList.remove('visible');
+  console.log('[确认] 用户确认购买，进入验证码...');
+  // 进入验证码流程，验证通过后自动打开支付弹窗
+  triggerCaptcha();
+});
+
 function drawQRCode() {
   const canvas = document.getElementById('qrCanvas');
   const ctx = canvas.getContext('2d');
@@ -379,20 +421,164 @@ function drawQRCode() {
   });
 }
 
+// ==================== 验证码图片集（刷新时交替切换）====================
+const CAPTCHA_SETS = [
+  {
+    img: 'captcha_test.png',
+    prompt: '请依次点击：备 波 隘',
+    targets: [
+      { char: '备', cx: 75, cy: 79 },
+      { char: '波', cx: 281, cy: 24 },
+      { char: '隘', cx: 280, cy: 128 },
+    ],
+  },
+  {
+    img: 'captcha_test_2.png',
+    prompt: '请依次点击：版 斑 稗',
+    targets: [
+      { char: '版', cx: 231, cy: 29 },
+      { char: '斑', cx: 277, cy: 27 },
+      { char: '稗', cx: 178, cy: 173 },
+    ],
+  },
+];
+const CAPTCHA_TOLERANCE = 22; // 44px 字大小的一半
+let currentCaptchaIdx = 0;    // 当前显示的验证码索引
+let captchaClicks = [];       // [{x, y}, ...]
+
+function currentCaptcha() { return CAPTCHA_SETS[currentCaptchaIdx]; }
+
+function validateCaptchaClicks() {
+  const targets = currentCaptcha().targets;
+  if (captchaClicks.length !== targets.length) {
+    return { ok: false, msg: `验证错误：点击了 ${captchaClicks.length} 次，需要 ${targets.length} 次，请重试` };
+  }
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    const c = captchaClicks[i];
+    const dist = Math.hypot(c.x - t.cx, c.y - t.cy);
+    if (dist > CAPTCHA_TOLERANCE) {
+      return { ok: false, msg: `验证错误：第 ${i + 1} 个点击偏离「${t.char}」中心 ${dist.toFixed(0)}px，请重试` };
+    }
+  }
+  return { ok: true };
+}
+
 // ==================== 验证码弹窗 ====================
 function triggerCaptcha() {
+  captchaClicks = [];
+  const set = currentCaptcha();
+  const el = document.getElementById('captchaImage');
+  const errEl = document.getElementById('captchaError');
+  el.style.display = 'inline-block';
+  el.style.minHeight = '';
+  el.style.color = '';
+  el.style.fontSize = '';
+  el.innerHTML = `<img src="${set.img}" alt="验证码" style="display:block;border-radius:8px;" id="captchaImg"><canvas id="captchaClickCanvas" style="position:absolute;top:0;left:0;pointer-events:none;border-radius:8px;"></canvas>`;
+  document.getElementById('captchaPrompt').textContent = set.prompt;
+  document.getElementById('captchaCoords').textContent =
+    '字坐标: ' + set.targets.map(t => `${t.char}(${t.cx},${t.cy})`).join(' ') + ' | 字大小 44×44px';
   document.getElementById('captchaModal').classList.add('visible');
+  document.getElementById('captchaClickLog').textContent = '';
+  errEl.style.display = 'none';
+  errEl.textContent = '';
+  setupCaptchaClickTracking();
+}
+
+function setupCaptchaClickTracking() {
+  const img = document.getElementById('captchaImg');
+  const canvas = document.getElementById('captchaClickCanvas');
+  if (!img || !canvas) return;
+  const onLoad = () => {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.style.width = img.naturalWidth + 'px';
+    canvas.style.height = img.naturalHeight + 'px';
+  };
+  if (img.complete) onLoad(); else img.addEventListener('load', onLoad);
+
+  img.style.pointerEvents = 'auto';
+  img.addEventListener('click', function(e) {
+    const rect = img.getBoundingClientRect();
+    const x = Math.round(e.clientX - rect.left);
+    const y = Math.round(e.clientY - rect.top);
+    captchaClicks.push({ x, y });
+    const ctx = canvas.getContext('2d');
+    const maxClicks = currentCaptcha().targets.length;
+    const color = captchaClicks.length <= maxClicks ? 'rgba(255, 50, 50, 0.85)' : 'rgba(255, 150, 50, 0.6)';
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const log = document.getElementById('captchaClickLog');
+    const prev = log.textContent ? log.textContent.split(' | ') : [];
+    prev.push(`(${x},${y})`);
+    if (prev.length > 6) prev.shift();
+    log.textContent = '点击坐标: ' + prev.join(' → ');
+    console.log(`[验证码点击] 图内(${x},${y}) [第${captchaClicks.length}次]`);
+  });
 }
 
 document.getElementById('btnCaptchaConfirm').addEventListener('click', () => {
+  const result = validateCaptchaClicks();
+  if (!result.ok) {
+    // 验证失败：显示错误信息（含 Python 主程序可识别的关键词"验证错误""请重试"）
+    const errEl = document.getElementById('captchaError');
+    errEl.textContent = result.msg;
+    errEl.style.display = 'block';
+    console.log('[验证码] ' + result.msg);
+    // 清掉点击记录和画布，允许重试
+    captchaClicks = [];
+    const canvas = document.getElementById('captchaClickCanvas');
+    if (canvas) { const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height); }
+    document.getElementById('captchaClickLog').textContent = '';
+    return;
+  }
+  // 验证通过：清除旧错误提示，防止 Python 程序误判
+  const errEl2 = document.getElementById('captchaError');
+  errEl2.style.display = 'none';
+  errEl2.textContent = '';
   document.getElementById('captchaModal').classList.remove('visible');
   console.log('[验证码] 验证通过');
+  if (state.pendingBuy) {
+    const { plan, period } = state.pendingBuy;
+    state.pendingBuy = null;
+    fetchSubmitOrder(plan, period);
+    state.orderPlaced = true;
+    showPaymentModal(plan, period);
+    document.getElementById('qrContainer').style.display = 'block';
+    drawQRCode();
+  }
 });
 
 document.getElementById('captchaRefresh').addEventListener('click', () => {
+  currentCaptchaIdx = (currentCaptchaIdx + 1) % CAPTCHA_SETS.length;
+  captchaClicks = [];
+  const set = currentCaptcha();
   const el = document.getElementById('captchaImage');
-  el.innerHTML = '验证码已刷新<br><small>新图片: ' + Math.random().toString(36).slice(2,8) + '</small>';
-  console.log('[验证码] 已刷新');
+  const errEl = document.getElementById('captchaError');
+  // 显示 loading（供 Python _wait_captcha_loading 检测）
+  const loadingEl = document.querySelector('.tencent-captcha-dy__verify-status-img--loading');
+  if (loadingEl) loadingEl.style.display = 'flex';
+  el.style.display = 'inline-block';
+  el.style.minHeight = '';
+  el.style.color = '';
+  el.style.fontSize = '';
+  el.innerHTML = `<img src="${set.img}" alt="验证码" style="display:block;border-radius:8px;" id="captchaImg"><canvas id="captchaClickCanvas" style="position:absolute;top:0;left:0;pointer-events:none;border-radius:8px;"></canvas>`;
+  const newImg = document.getElementById('captchaImg');
+  const onImgLoad = () => { if (loadingEl) loadingEl.style.display = 'none'; };
+  if (newImg) { newImg.addEventListener('load', onImgLoad); newImg.addEventListener('error', onImgLoad); }
+  document.getElementById('captchaPrompt').textContent = set.prompt;
+  document.getElementById('captchaCoords').textContent =
+    '字坐标: ' + set.targets.map(t => `${t.char}(${t.cx},${t.cy})`).join(' ') + ' | 字大小 44×44px';
+  document.getElementById('captchaClickLog').textContent = '';
+  errEl.style.display = 'none';
+  errEl.textContent = '';
+  setupCaptchaClickTracking();
+  console.log('[验证码] 已刷新，切换到: ' + set.prompt);
 });
 
 function triggerPayment() {
@@ -543,6 +729,9 @@ console.log('[GLM模拟页] 点击右下角 ⚙ 打开测试控制面板');
 // 页面加载时自动发一次 API 请求，确保 Authorization 头被 browser.py 的
 // page.on("request") 监听器捕获，供后续 api.py 的 httpx 直连调用使用.
 fetchBatchPreview('lite', 'quarterly');
+
+// 初始化验证码图片点击追踪
+setupCaptchaClickTracking();
 </script>
 
 </body>

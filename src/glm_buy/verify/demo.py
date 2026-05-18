@@ -17,7 +17,7 @@ import numpy as np
 from loguru import logger
 from playwright.async_api import async_playwright
 
-from glm_buy.config import CAPTCHA_SELECTORS
+from glm_buy.config import CAPTCHA_SELECTORS, config
 from glm_buy.logger import setup_logging
 from glm_buy.mouse import Mouse
 from glm_buy.verify.solver import CaptchaSolver
@@ -151,9 +151,9 @@ async def solve_captcha(page, mouse, solver, max_attempts: int = 3) -> bool:
     tcaptcha, _ = await _find_in_frames(page, tcaptcha_sel)
     if not tcaptcha:
       raise Exception(f"未找到 {tcaptcha_sel}")
-    await tcaptcha.wait_for(state="attached", timeout=15000)
+    await tcaptcha.wait_for(state="visible", timeout=15000)
     logger.info("验证码弹窗已出现")
-    await asyncio.sleep(1)
+    await asyncio.sleep(config.captcha_appear_delay_ms / 1000)
   except Exception as e:
     logger.error(f"验证码弹窗未在 15 秒内出现: {e}")
     return False
@@ -176,14 +176,23 @@ async def solve_captcha(page, mouse, solver, max_attempts: int = 3) -> bool:
     need_refresh = False
     if clicked:
       await _click_confirm_button(page, mouse)
-      await asyncio.sleep(1)
-      body = ""
+      await asyncio.sleep(config.captcha_verify_delay_ms / 1000)
+      # 检查是否有可见的验证错误元素（而非整页文本，避免读到已隐藏的旧错误）
+      visible_error = False
       for f in [page] + [f for f in page.frames if f != page]:
         try:
-          body += (await f.text_content("body") or "")
+          for kw in ("验证错误", "请重试"):
+            for el in await f.locator(f"text={kw}").all():
+              if await el.is_visible():
+                visible_error = True
+                break
+            if visible_error:
+              break
         except Exception:
           pass
-      if "验证错误" in body or "请重试" in body:
+        if visible_error:
+          break
+      if visible_error:
         logger.info("验证错误，需要刷新重试")
         need_refresh = True
       else:
@@ -202,7 +211,7 @@ async def solve_captcha(page, mouse, solver, max_attempts: int = 3) -> bool:
             await mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
             logger.info("已点击验证码刷新按钮")
             await _wait_captcha_loading(page)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(config.captcha_refresh_delay_ms / 1000)
           else:
             logger.warning("刷新按钮不可见")
         else:
@@ -238,9 +247,9 @@ async def _capture_captcha(page):
     box = await bg_img.bounding_box()
     if box:
       offset_x, offset_y = box["x"], box["y"]
-    screenshot = await bg_img.screenshot()
-    logger.info(f"截取 {S['opera']} (offset=({offset_x:.0f},{offset_y:.0f}))")
-    return screenshot, offset_x, offset_y
+      screenshot = await bg_img.screenshot()
+      logger.info(f"截取 {S['opera']} (offset=({offset_x:.0f},{offset_y:.0f}))")
+      return screenshot, offset_x, offset_y
 
   # captcha_box, _ = await _find_in_frames(page, S["container"])
   # if captcha_box:
@@ -298,7 +307,7 @@ async def _wait_captcha_loading(page) -> None:
 async def _click_confirm_button(page, mouse) -> None:
   """在所有 frame 中搜索确认按钮并点击."""
   try:
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(config.captcha_confirm_delay_ms / 1000)
     confirm = S["confirm_btn_text"]
     for frame in [page] + [f for f in page.frames if f != page]:
       try:
@@ -350,7 +359,7 @@ async def _recognize_and_click(
           page_cx, page_cy = cx + offset_x, cy + offset_y
           logger.info(f"  '{text}'({conf:.0%}) → 页面({page_cx:.0f},{page_cy:.0f})")
           await mouse.click(page_cx, page_cy)
-          await asyncio.sleep(0.3)
+          await asyncio.sleep(config.captcha_click_interval_ms / 1000)
         return True
       return False
     except Exception as e:
@@ -364,7 +373,7 @@ async def _recognize_and_click(
       page_cx, page_cy = cx + offset_x, cy + offset_y
       logger.info(f"  图内({cx},{cy}) → 页面({page_cx:.0f},{page_cy:.0f})")
       await mouse.click(page_cx, page_cy)
-      await asyncio.sleep(0.3)
+      await asyncio.sleep(config.captcha_click_interval_ms / 1000)
     return True
   return False
 

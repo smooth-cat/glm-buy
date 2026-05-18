@@ -45,6 +45,7 @@ class Scheduler:
     self.browser: BrowserManager | None = None  # 浏览器管理器（start 时创建）
     self.dom: DOMReader | None = None      # DOM 读取器
     self.mouse: Mouse | None = None        # 鼠标模拟器
+    self._captcha_solver = CaptchaSolver()   # 验证码识别器（只初始化一次，避免重复加载模型）
 
     # ---- 运行状态（对应 JS 版 state 对象） ----
     self._retry_count = 0        # 当前轮次重试次数
@@ -458,8 +459,7 @@ class Scheduler:
             if modal_type == "captcha":
               # 自动识别 + 点击验证码
               logger.info("开始自动识别验证码...")
-              captcha_solver = CaptchaSolver()
-              ok = await solve_captcha(self.browser.page, self.mouse, captcha_solver)
+              ok = await solve_captcha(self.browser.page, self.mouse, self._captcha_solver)
               if ok:
                 logger.info("验证码已自动通过，继续抢购...")
                 self._modal_visible = False

@@ -43,6 +43,16 @@ class Config:
   headless: bool = False
   user_data_dir: str = "browser_profile"
   purchase_url: str = "https://open.bigmodel.cn/glm-coding"
+  # 验证码点击间隔 (ms): 依次点击各文字之间的停顿
+  captcha_click_interval_ms: int = 300
+  # 验证码确认前延迟 (ms): 点击完文字后，等待再点"确定"按钮
+  captcha_confirm_delay_ms: int = 100
+  # 验证码出现后延迟 (ms): 弹窗出现后等待图片渲染
+  captcha_appear_delay_ms: int = 300
+  # 验证码确定后延迟 (ms): 点"确定"后等待页面反馈
+  captcha_verify_delay_ms: int = 1000
+  # 验证码刷新后延迟 (ms): 点刷新按钮后等待新图片加载
+  captcha_refresh_delay_ms: int = 300
 
 
 def _env_int(name: str, default: int) -> int:
