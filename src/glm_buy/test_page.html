@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GLM Coding Plan - 模拟购买页</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0a0e27; color: #e0e0e0; min-height: 100vh;
+  }
+
+  /* ====== 顶部导航 ====== */
+  .nav { display: flex; align-items: center; justify-content: space-between; padding: 16px 40px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .nav-logo { font-size: 20px; font-weight: 700; color: #fff; }
+  .nav-logo span { color: #4d7cff; }
+
+  /* ====== 页面标题区 ====== */
+  .hero { text-align: center; padding: 48px 20px 32px; }
+  .hero h1 { font-size: 36px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .hero p  { color: #8892b0; font-size: 16px; }
+
+  /* ====== 套餐卡片容器 ====== */
+  .plans-container { display: flex; justify-content: center; gap: 24px; padding: 0 40px 60px; flex-wrap: wrap; }
+  .plan-card {
+    background: linear-gradient(145deg, #141832 0%, #1a1f3a 100%);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
+    padding: 32px 28px; width: 340px; position: relative;
+    transition: border-color 0.3s, transform 0.3s;
+  }
+  .plan-card:hover { border-color: #4d7cff; transform: translateY(-4px); }
+  .plan-card.recommended { border-color: #4d7cff; }
+  .plan-card.recommended::before {
+    content: "推荐"; position: absolute; top: 12px; right: 16px;
+    background: #4d7cff; color: #fff; font-size: 12px; padding: 2px 10px; border-radius: 10px;
+  }
+  .plan-name { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .plan-desc { color: #8892b0; font-size: 14px; margin-bottom: 20px; }
+
+  /* 计费周期选择 */
+  .billing-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .billing-tab {
+    flex: 1; text-align: center; padding: 8px 0; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.12); cursor: pointer;
+    font-size: 14px; color: #8892b0; transition: all 0.2s;
+    background: transparent;
+  }
+  .billing-tab:hover { border-color: #4d7cff; color: #ccd6f6; }
+  .billing-tab.active { background: rgba(77,124,255,0.15); border-color: #4d7cff; color: #4d7cff; }
+
+  .price { font-size: 32px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .price .unit { font-size: 16px; color: #8892b0; }
+  .price .original { font-size: 16px; color: #555; text-decoration: line-through; margin-left: 8px; }
+
+  /* 购买按钮 */
+  .btn-buy {
+    display: block; width: 100%; padding: 12px 0; border-radius: 10px;
+    border: none; cursor: pointer; font-size: 16px; font-weight: 600;
+    transition: all 0.2s; margin-top: 20px;
+  }
+  .btn-primary { background: linear-gradient(135deg, #4d7cff, #6366f1); color: #fff; }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-sold-out {
+    background: rgba(255,255,255,0.06); color: #555; cursor: not-allowed;
+  }
+
+  /* ====== 弹窗/对话框 ====== */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 1000; align-items: center; justify-content: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal-dialog {
+    background: #1a1f3a; border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px; padding: 32px; min-width: 420px; max-width: 520px;
+    position: relative;
+  }
+  .modal-dialog h3 { color: #fff; font-size: 20px; margin-bottom: 16px; text-align: center; }
+  .modal-dialog .order-info { color: #8892b0; font-size: 14px; margin-bottom: 20px; text-align: center; }
+
+  /* 二维码区域 */
+  .qr-area { text-align: center; padding: 20px; }
+  .qr-area canvas { border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; }
+
+  /* 弹窗按钮 */
+  .modal-actions { display: flex; gap: 12px; margin-top: 20px; justify-content: center; }
+  .btn-confirm {
+    padding: 10px 40px; border-radius: 8px; border: none; cursor: pointer;
+    font-size: 15px; font-weight: 600; background: linear-gradient(135deg, #4d7cff, #6366f1);
+    color: #fff; transition: all 0.2s;
+  }
+  .btn-confirm:hover { opacity: 0.9; }
+  .btn-cancel {
+    padding: 10px 40px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12);
+    cursor: pointer; font-size: 15px; color: #8892b0; background: transparent;
+  }
+
+  /* 验证码弹窗 */
+  .captcha-box { text-align: center; padding: 16px; }
+  .captcha-box .tc-bg-img { width: 300px; height: 200px; background: #2a2f4a; border-radius: 8px; margin: 0 auto; display: flex; align-items: center; justify-content: center; color: #8892b0; font-size: 14px; }
+  .captcha-box .tc-opera { margin-top: 12px; }
+
+  /* 腾讯云验证码模拟 */
+  .tencent-captcha-dy__image-area { position: relative; display: inline-block; }
+  .tencent-captcha-dy__verify-status-img--loading { display: none; }
+
+  /* ====== 错误横幅 ====== */
+  .error-banner {
+    display: none; background: rgba(255,80,80,0.1); border: 1px solid rgba(255,80,80,0.3);
+    color: #ff6b6b; text-align: center; padding: 12px; margin: 20px 40px; border-radius: 8px;
+  }
+  .error-banner.visible { display: block; }
+
+  /* ====== 测试控制面板 ====== */
+  .test-panel {
+    position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+    background: #1a1f3a; border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 16px; min-width: 280px; font-size: 13px;
+  }
+  .test-panel h4 { color: #4d7cff; margin-bottom: 10px; font-size: 14px; }
+  .test-panel label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; color: #8892b0; cursor: pointer; }
+  .test-panel input[type="checkbox"] { accent-color: #4d7cff; }
+  .test-panel button {
+    display: block; width: 100%; padding: 6px 0; margin-top: 4px;
+    border-radius: 6px; border: 1px solid rgba(255,255,255,0.12);
+    background: transparent; color: #8892b0; cursor: pointer; font-size: 12px;
+  }
+  .test-panel button:hover { border-color: #4d7cff; color: #ccd6f6; }
+  .test-panel hr { border-color: rgba(255,255,255,0.06); margin: 8px 0; }
+  .test-toggle { position: fixed; bottom: 20px; right: 20px; z-index: 10000; background: #4d7cff; color: #fff; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; font-size: 18px; display: none; }
+</style>
+</head>
+<body>
+
+<!-- ====== 导航栏 ====== -->
+<nav class="nav">
+  <div class="nav-logo">智谱<span>AI</span>开放平台</div>
+  <div style="color:#8892b0;font-size:14px;">GLM Coding Plan</div>
+</nav>
+
+<!-- ====== 标题 ====== -->
+<section class="hero">
+  <h1>GLM Coding 订阅计划</h1>
+  <p>选择适合你的套餐，解锁 AI 编程能力</p>
+</section>
+
+<!-- ====== 错误横幅（测试用） ====== -->
+<div class="error-banner" id="errorBanner" style="display:none;">
+</div>
+
+<!-- ====== 套餐卡片 ====== -->
+<div class="plans-container">
+
+  <!-- Lite 套餐 -->
+  <article class="plan-card" id="card-lite" data-plan="lite" style="height:480px;width:340px;">
+    <div class="plan-name">Lite 轻量版</div>
+    <div class="plan-desc">适合个人开发者日常使用</div>
+    <div class="billing-tabs">
+      <button class="billing-tab" data-period="monthly" data-plan="lite" style="width:100px;height:36px;">包月</button>
+      <button class="billing-tab active" data-period="quarterly" data-plan="lite" style="width:100px;height:36px;">包季</button>
+      <button class="billing-tab" data-period="yearly" data-plan="lite" style="width:100px;height:36px;">包年</button>
+    </div>
+    <div class="price" id="price-lite">¥299<span class="unit">/季</span><span class="original">¥399</span></div>
+    <button class="btn-buy btn-primary" id="buy-lite" style="height:48px;">特惠订阅 Lite</button>
+    <button class="btn-buy btn-sold-out" id="soldout-lite" style="display:none;height:48px;">Lite 已售罄</button>
+  </article>
+
+  <!-- Pro 套餐 -->
+  <article class="plan-card recommended" id="card-pro" data-plan="pro" style="height:480px;width:340px;">
+    <div class="plan-name">Pro 专业版</div>
+    <div class="plan-desc">适合专业开发者高强度使用</div>
+    <div class="billing-tabs">
+      <button class="billing-tab active" data-period="monthly" data-plan="pro" style="width:100px;height:36px;">包月</button>
+      <button class="billing-tab" data-period="quarterly" data-plan="pro" style="width:100px;height:36px;">包季</button>
+      <button class="billing-tab" data-period="yearly" data-plan="pro" style="width:100px;height:36px;">包年</button>
+    </div>
+    <div class="price" id="price-pro">¥599<span class="unit">/月</span><span class="original">¥799</span></div>
+    <button class="btn-buy btn-primary" id="buy-pro" style="height:48px;">特惠购买 Pro</button>
+    <button class="btn-buy btn-sold-out" id="soldout-pro" style="display:none;height:48px;">Pro 已售罄</button>
+  </article>
+
+  <!-- Max 套餐 -->
+  <article class="plan-card" id="card-max" data-plan="max" style="height:480px;width:340px;">
+    <div class="plan-name">Max 旗舰版</div>
+    <div class="plan-desc">适合企业级用户，无限调用</div>
+    <div class="billing-tabs">
+      <button class="billing-tab" data-period="monthly" data-plan="max" style="width:100px;height:36px;">包月</button>
+      <button class="billing-tab active" data-period="quarterly" data-plan="max" style="width:100px;height:36px;">包季</button>
+      <button class="billing-tab" data-period="yearly" data-plan="max" style="width:100px;height:36px;">包年</button>
+    </div>
+    <div class="price" id="price-max">¥999<span class="unit">/季</span><span class="original">¥1299</span></div>
+    <button class="btn-buy btn-primary" id="buy-max" style="height:48px;">立即订阅 Max</button>
+    <button class="btn-buy btn-sold-out" id="soldout-max" style="display:none;height:48px;">Max 已售罄</button>
+  </article>
+
+</div>
+
+<!-- ====== 支付弹窗 ====== -->
+<div class="modal-overlay" id="paymentModal" role="dialog">
+  <div class="modal-dialog" style="min-height:380px;">
+    <h3>订单确认</h3>
+    <div class="order-info" id="orderPlanName">Lite 轻量版 - 包季</div>
+    <div class="qr-area" id="qrContainer" style="display:none;">
+      <p style="color:#8892b0;font-size:13px;margin-bottom:8px;">请使用微信/支付宝扫码支付</p>
+      <canvas id="qrCanvas" width="200" height="200" style="border:1px solid rgba(255,255,255,0.1);border-radius:8px;"></canvas>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btnCancelPay">取消</button>
+      <button class="btn-confirm" id="btnConfirmPay">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 验证码弹窗 ====== -->
+<div class="modal-overlay" id="captchaModal" role="dialog">
+  <div class="modal-dialog" style="min-height:360px;">
+    <h3>安全验证</h3>
+    <p style="color:#8892b0;font-size:13px;text-align:center;margin-bottom:16px;">请完成下方验证后继续</p>
+    <div class="captcha-box">
+      <div class="tencent-captcha-dy__image-area" style="position:relative;">
+        <div class="tc-bg-img" id="captchaImage" style="width:300px;height:200px;display:flex;align-items:center;justify-content:center;color:#8892b0;font-size:14px;background:#2a2f4a;border-radius:8px;">
+          模拟验证码图片<br><small>（实际测试中截图后由 OCR 识别）</small>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:center;gap:12px;">
+        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%238892b0' stroke-width='2'%3E%3Cpath d='M1 4v6h6'/%3E%3Cpath d='M23 20v-6h-6'/%3E%3Cpath d='M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15'/%3E%3C/svg%3E" alt="刷新验证" style="cursor:pointer;width:28px;height:28px;" id="captchaRefresh">
+        <span style="color:#8892b0;font-size:13px;">看不清？点击刷新</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-confirm" id="btnCaptchaConfirm">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 测试控制面板 ====== -->
+<button class="test-toggle" id="testToggle" style="display:block;position:fixed;bottom:20px;right:20px;z-index:10000;" onclick="toggleTestPanel()">⚙</button>
+<div class="test-panel" id="testPanel">
+  <h4>测试控制面板</h4>
+  <label><input type="checkbox" id="chkSoldOutLite" onchange="toggleSoldOut('lite', this.checked)"> Lite 售罄</label>
+  <label><input type="checkbox" id="chkSoldOutPro" onchange="toggleSoldOut('pro', this.checked)"> Pro 售罄</label>
+  <label><input type="checkbox" id="chkSoldOutMax" onchange="toggleSoldOut('max', this.checked)"> Max 售罄</label>
+  <hr>
+  <label><input type="checkbox" id="chkError" onchange="toggleError(this.checked)"> 显示错误横幅</label>
+  <label><input type="checkbox" id="chkBlank" onchange="toggleBlank(this.checked)"> 模拟空白页</label>
+  <hr>
+  <button onclick="triggerCaptcha()">触发验证码弹窗</button>
+  <button onclick="triggerPayment()">触发支付弹窗(带QR)</button>
+  <button onclick="triggerRateLimit()">模拟限流页面</button>
+  <hr>
+  <button onclick="simulateApiCall()">模拟 API 调用</button>
+  <span id="apiStatus" style="color:#4d7cff;font-size:11px;"></span>
+</div>
+
+<script>
+// ==================== 全局状态 ====================
+const state = {
+  selectedPlan: 'lite',
+  selectedPeriod: 'quarterly',
+  soldOut: { lite: false, pro: false, max: false },
+  orderPlaced: false,
+};
+
+const PRICES = {
+  lite:   { monthly: 99,  quarterly: 299,  yearly: 999  },
+  pro:    { monthly: 599, quarterly: 1499, yearly: 4999 },
+  max:    { monthly: 999, quarterly: 2499, yearly: 7999 },
+};
+
+const ORIGINALS = {
+  lite:   { monthly: 129, quarterly: 399,  yearly: 1299 },
+  pro:    { monthly: 799, quarterly: 1999, yearly: 5999 },
+  max:    { monthly: 1299,quarterly: 2999, yearly: 9999 },
+};
+
+const PLAN_NAMES = { lite: 'Lite 轻量版', pro: 'Pro 专业版', max: 'Max 旗舰版' };
+const PERIOD_LABELS = { monthly: '包月', quarterly: '包季', yearly: '包年' };
+
+// ==================== 计费周期切换 ====================
+document.querySelectorAll('.billing-tab').forEach(tab => {
+  tab.addEventListener('click', function() {
+    const plan = this.dataset.plan;
+    const period = this.dataset.period;
+    if (!plan || !period) return;
+
+    // 更新当前卡片的活跃标签
+    const card = document.getElementById('card-' + plan);
+    card.querySelectorAll('.billing-tab').forEach(t => t.classList.remove('active'));
+    this.classList.add('active');
+
+    // 更新价格
+    updatePrice(plan, period);
+
+    // 更新全局状态并触发 API
+    state.selectedPlan = plan;
+    state.selectedPeriod = period;
+    fetchBatchPreview(plan, period);
+
+    console.log(`[计费] 切换到 ${PLAN_NAMES[plan]} - ${PERIOD_LABELS[period]}`);
+  });
+});
+
+function updatePrice(plan, period) {
+  const price = PRICES[plan][period];
+  const original = ORIGINALS[plan][period];
+  const el = document.getElementById('price-' + plan);
+  const unit = { monthly: '/月', quarterly: '/季', yearly: '/年' }[period];
+  el.innerHTML = `¥${price}<span class="unit">${unit}</span><span class="original">¥${original}</span>`;
+}
+
+// ==================== 购买按钮点击 ====================
+document.querySelectorAll('.btn-primary').forEach(btn => {
+  btn.addEventListener('click', async function() {
+    const planId = this.id.replace('buy-', '');
+    if (state.soldOut[planId]) return;
+
+    const plan = state.selectedPlan;
+    const period = state.selectedPeriod;
+
+    console.log(`[购买] 点击购买: ${PLAN_NAMES[plan]} - ${PERIOD_LABELS[period]}`);
+
+    // 模拟 API 调用：订单预览
+    await fetchOrderPreview(plan, period);
+
+    // 打开支付弹窗
+    showPaymentModal(plan, period);
+  });
+});
+
+// ==================== 支付弹窗 ====================
+function showPaymentModal(plan, period) {
+  document.getElementById('orderPlanName').textContent =
+    `${PLAN_NAMES[plan]} - ${PERIOD_LABELS[period]} - ¥${PRICES[plan][period]}`;
+  document.getElementById('qrContainer').style.display = 'none';
+  document.getElementById('paymentModal').classList.add('visible');
+  state.orderPlaced = false;
+}
+
+document.getElementById('btnCancelPay').addEventListener('click', () => {
+  document.getElementById('paymentModal').classList.remove('visible');
+});
+
+document.getElementById('btnConfirmPay').addEventListener('click', async () => {
+  // 模拟提交订单 API
+  await fetchSubmitOrder(state.selectedPlan, state.selectedPeriod);
+  state.orderPlaced = true;
+
+  // 显示二维码
+  const qrContainer = document.getElementById('qrContainer');
+  qrContainer.style.display = 'block';
+  drawQRCode();
+  console.log('[支付] 订单已提交，显示扫描支付二维码');
+});
+
+function drawQRCode() {
+  const canvas = document.getElementById('qrCanvas');
+  const ctx = canvas.getContext('2d');
+  // 画一个模拟的二维码图案
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 200, 200);
+  ctx.fillStyle = '#000000';
+  const size = 8;
+  for (let x = 0; x < 200; x += size) {
+    for (let y = 0; y < 200; y += size) {
+      if (Math.random() > 0.5) {
+        ctx.fillRect(x, y, size - 1, size - 1);
+      }
+    }
+  }
+  // 三个定位图案
+  [[20,20],[156,20],[20,156]].forEach(([ox,oy]) => {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(ox, oy, 24, 24);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(ox+4, oy+4, 16, 16);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(ox+8, oy+8, 8, 8);
+  });
+}
+
+// ==================== 验证码弹窗 ====================
+function triggerCaptcha() {
+  document.getElementById('captchaModal').classList.add('visible');
+}
+
+document.getElementById('btnCaptchaConfirm').addEventListener('click', () => {
+  document.getElementById('captchaModal').classList.remove('visible');
+  console.log('[验证码] 验证通过');
+});
+
+document.getElementById('captchaRefresh').addEventListener('click', () => {
+  const el = document.getElementById('captchaImage');
+  el.innerHTML = '验证码已刷新<br><small>新图片: ' + Math.random().toString(36).slice(2,8) + '</small>';
+  console.log('[验证码] 已刷新');
+});
+
+function triggerPayment() {
+  showPaymentModal('lite', 'quarterly');
+  state.orderPlaced = true;
+  document.getElementById('qrContainer').style.display = 'block';
+  drawQRCode();
+}
+
+// ==================== 售罄切换 ====================
+function toggleSoldOut(plan, isSoldOut) {
+  state.soldOut[plan] = isSoldOut;
+  const buyBtn = document.getElementById('buy-' + plan);
+  const soldBtn = document.getElementById('soldout-' + plan);
+  if (isSoldOut) {
+    buyBtn.style.display = 'none';
+    soldBtn.style.display = 'block';
+  } else {
+    buyBtn.style.display = 'block';
+    soldBtn.style.display = 'none';
+  }
+}
+
+// ==================== 错误横幅 ====================
+function toggleError(show) {
+  const banner = document.getElementById('errorBanner');
+  if (show) {
+    const msgs = ['访问人数较多，请刷新重试', '服务繁忙，请稍后再试', '网络错误，加载失败'];
+    banner.textContent = msgs[Math.floor(Math.random() * msgs.length)];
+    banner.style.display = 'block';
+  } else {
+    banner.textContent = '';
+    banner.style.display = 'none';
+  }
+}
+
+// ==================== 空白页模拟 ====================
+let blankBackup = null;
+function toggleBlank(blank) {
+  if (blank) {
+    blankBackup = document.body.innerHTML;
+    document.body.innerHTML = '<div></div>';
+  } else if (blankBackup) {
+    document.body.innerHTML = blankBackup;
+    blankBackup = null;
+    // 页面重建后重新绑定事件有点麻烦，这里简单提示刷新
+    location.reload();
+  }
+}
+
+// ==================== 限流页模拟 ====================
+function triggerRateLimit() {
+  // 通过修改 URL hash 来模拟（实际项目中 browser.py 检查 URL 是否含 rate-limit）
+  const newUrl = window.location.origin + window.location.pathname + '?rate-limit=true';
+  window.history.pushState({}, '', newUrl);
+  document.body.innerHTML = '<div style="text-align:center;padding:100px;color:#fff;"><h2>访问频率限制</h2><p>请稍后再试</p></div>';
+}
+
+// ==================== API 模拟 ====================
+async function fetchBatchPreview(plan, period) {
+  const body = {
+    planType: plan,
+    billingPeriod: period,
+  };
+  try {
+    const resp = await fetch('/api/biz/pay/batch-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer mock-token-test' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    console.log('[API] batch-preview 响应:', data);
+    return data;
+  } catch (e) {
+    console.log('[API] batch-preview 请求失败 (预期行为，由拦截器处理):', e.message);
+  }
+}
+
+async function fetchOrderPreview(plan, period) {
+  const body = {
+    planType: plan,
+    billingPeriod: period,
+    productId: '',  // 由拦截器注入
+  };
+  try {
+    const resp = await fetch('/api/biz/pay/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer mock-token-test' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    console.log('[API] preview 响应:', data);
+    return data;
+  } catch (e) {
+    console.log('[API] preview 请求失败 (预期行为，由拦截器处理):', e.message);
+  }
+}
+
+async function fetchSubmitOrder(plan, period) {
+  const body = {
+    planType: plan,
+    billingPeriod: period,
+    productId: 'prod_' + Math.random().toString(36).slice(2, 10),
+  };
+  try {
+    const resp = await fetch('/api/biz/pay/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer mock-token-test' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    console.log('[API] submit 响应:', data);
+    return data;
+  } catch (e) {
+    console.log('[API] submit 请求失败 (预期行为，由拦截器处理):', e.message);
+  }
+}
+
+async function simulateApiCall() {
+  document.getElementById('apiStatus').textContent = '请求中...';
+  await fetchBatchPreview('lite', 'quarterly');
+  document.getElementById('apiStatus').textContent = '已完成';
+  setTimeout(() => { document.getElementById('apiStatus').textContent = ''; }, 2000);
+}
+
+// ==================== 测试面板显示/隐藏 ====================
+function toggleTestPanel() {
+  const panel = document.getElementById('testPanel');
+  const toggle = document.getElementById('testToggle');
+  if (panel.style.display === 'none') {
+    panel.style.display = 'block';
+    toggle.style.bottom = '320px';
+  } else {
+    panel.style.display = 'none';
+    toggle.style.bottom = '20px';
+  }
+}
+// 初始隐藏面板
+document.getElementById('testPanel').style.display = 'none';
+
+// ==================== 初始化 ====================
+console.log('[GLM模拟页] 已就绪，可测试抢购脚本');
+console.log('[GLM模拟页] 页面元素: 3个套餐卡片, 购买按钮, 计费周期标签');
+console.log('[GLM模拟页] 弹窗: 支付弹窗(带QR), 验证码弹窗');
+console.log('[GLM模拟页] API 端点: /api/biz/pay/batch-preview, /api/biz/pay/preview');
+console.log('[GLM模拟页] 点击右下角 ⚙ 打开测试控制面板');
+
+// 页面加载时自动发一次 API 请求，确保 Authorization 头被 browser.py 的
+// page.on("request") 监听器捕获，供后续 api.py 的 httpx 直连调用使用.
+fetchBatchPreview('lite', 'quarterly');
+</script>
+
+</body>
+</html>

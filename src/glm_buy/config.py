@@ -3,8 +3,16 @@
 
 修改 build_config() 即可定制抢购行为.
 其他文件通过 from glm_buy.config import config 引用当前配置.
+
+环境变量覆盖（方便测试）:
+  GLM_BUY_URL           → purchase_url
+  GLM_BUY_TARGET_HOUR   → target_hour
+  GLM_BUY_TARGET_MINUTE → target_minute
+  GLM_BUY_TARGET_SECOND → target_second
+  GLM_BUY_HEADLESS      → headless (设为 "1" 启用无头模式)
 """
 
+import os
 from dataclasses import dataclass, field
 
 
@@ -37,6 +45,18 @@ class Config:
   purchase_url: str = "https://open.bigmodel.cn/glm-coding"
 
 
+def _env_int(name: str, default: int) -> int:
+  """从环境变量读取整数，不存在则返回默认值."""
+  val = os.environ.get(name)
+  return int(val) if val else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+  """从环境变量读取布尔值（"1" 为 True），不存在则返回默认值."""
+  val = os.environ.get(name)
+  return val == "1" if val else default
+
+
 def build_config() -> Config:
   """
   构建配置对象 — 在这里修改参数来定制抢购行为.
@@ -44,21 +64,26 @@ def build_config() -> Config:
   Plan 选项:  'lite' | 'pro' | 'max'
   Period 选项: 'monthly' | 'quarterly' | 'yearly'
   列表顺序即优先级：第一个是首选，后续是候补.
+
+  支持环境变量覆盖（优先级高于此处的硬编码值）:
+    GLM_BUY_URL, GLM_BUY_TARGET_HOUR, GLM_BUY_TARGET_MINUTE,
+    GLM_BUY_TARGET_SECOND, GLM_BUY_HEADLESS
   """
   return Config(
       plan_priority=[
           PlanPriority(plan="lite", billing_period="quarterly"),
           # PlanPriority(plan="pro", billing_period="quarterly"),  # 候补
       ],
-      target_hour=10,
-      target_minute=0,
-      target_second=0,
+      target_hour=_env_int("GLM_BUY_TARGET_HOUR", 10),
+      target_minute=_env_int("GLM_BUY_TARGET_MINUTE", 0),
+      target_second=_env_int("GLM_BUY_TARGET_SECOND", 0),
       advance_ms=200,
       retry_interval=100,
       max_retries=300,
       auto_refresh=True,
       auto_refresh_seconds_before=10,
-      headless=False,
+      headless=_env_bool("GLM_BUY_HEADLESS", False),
+      purchase_url=os.environ.get("GLM_BUY_URL", "https://open.bigmodel.cn/glm-coding"),
   )
 
 

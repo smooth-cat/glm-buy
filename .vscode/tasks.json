@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "启动测试服务器",
+      "type": "shell",
+      "command": "python3 src/glm_buy/test_server.py 8765",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "GLM 模拟测试服务器",
+          "endsPattern": "按 Ctrl\\+C 停止"
+        }
+      }
+    }
+  ]
+}

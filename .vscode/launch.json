@@ -36,6 +36,17 @@
       "justMyCode": false
     },
     {
+      "name": "GLM 本地测试 (test-buy 等效)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug_launch.py",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "preLaunchTask": "启动测试服务器",
+      "justMyCode": false
+    },
+    {
       "name": "调试当前文件",
       "type": "debugpy",
       "request": "launch",

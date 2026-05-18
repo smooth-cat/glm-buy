@@ -75,7 +75,7 @@ class DOMReader:
     用于自动恢复逻辑（检测到错误 → 刷新页面）.
     """
     try:
-      text = await self._page.text_content("body") or ""  # 获取页面所有可见文本
+      text = await self._page.inner_text("body") or ""
       return any(kw in text for kw in ERROR_KEYWORDS)
     except Exception:
       return False
@@ -91,11 +91,10 @@ class DOMReader:
     判断标准：body 子元素 < 3 且文本内容 < 100 字符.
     """
     try:
-      # 用 JS 获取 body 的子元素数量
       child_count = await self._page.evaluate(
           "document.body ? document.body.children.length : 0"
       )
-      text = await self._page.text_content("body") or ""
+      text = await self._page.inner_text("body") or ""
       return child_count < 3 and len(text.strip()) < 100
     except Exception:
       return True  # 读取失败也认为页面有问题
@@ -374,6 +373,26 @@ class DOMReader:
       if total > self._last_qr_count:
         self._last_qr_count = total
         return True
+      return False
+    except Exception:
+      return False
+
+  async def has_qr_code(self) -> bool:
+    """
+    检查可见弹窗内是否存在支付二维码（绝对检查，非增量）.
+    用于支付弹窗分支，不依赖 _last_qr_count 基线.
+    """
+    try:
+      modals = await self._page.locator(
+          '[class*="modal"], [class*="dialog"], [class*="popup"], [role="dialog"]'
+      ).all()
+      for modal in modals:
+        if not await self._is_visible(modal):
+          continue
+        if await modal.locator(
+            'canvas, img[src*="qr"], img[src*="pay"]'
+        ).count() > 0:
+          return True
       return False
     except Exception:
       return False

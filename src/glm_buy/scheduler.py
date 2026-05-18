@@ -54,6 +54,7 @@ class Scheduler:
     self._preheated = False      # TCP 预热是否完成
     self._snipe_active = False   # 抢购循环是否活跃（用于安全退出循环）
     self._countdown_active = False  # 倒计时循环是否活跃
+    self._skip_countdown = False  # 页面刷新后跳过倒计时，直接进 maintenance
 
     # ---- 套餐切换管理 ----
     self._current_plan_idx = 0               # 当前正在尝试的套餐索引
@@ -269,16 +270,28 @@ class Scheduler:
     """
     logger.info("倒计时已启动")
     prewarm_done = False  # 预热是否已完成
+    target = self._get_target_time()  # 只算一次，不在循环内重算（否则过点后跳到明天）
 
     self._countdown_active = True
     while self._countdown_active:
-      target = self._get_target_time()
       diff_ms = (target - datetime.now()).total_seconds() * 1000
 
-      # 已过目标时间 → 退出倒计时（应由其他逻辑进入抢购）
-      if diff_ms <= 0:
-        logger.info("已过目标时间")
+      # ---- 到点：开始抢购（窗口: [advance_ms 之前, 1 个轮询周期之后]）----
+      if not self._is_running and -600 <= diff_ms <= self.config.advance_ms:
+        self._is_running = True
+        logger.info(f"开始抢购! (距目标{abs(diff_ms):.0f}ms)")
+        await self._start_snipe()
+        break  # 退出倒计时循环
+
+      # 已过目标时间超过 5 秒 → 跳过本轮
+      if diff_ms < -5000:
+        logger.info("已过目标时间超过5秒，跳过抢购")
         break
+
+      # 略微过点 → 加速轮询（0.1s 间隔，下一轮就能命中 advance 窗口）
+      if diff_ms <= 0:
+        await asyncio.sleep(0.1)
+        continue
 
       # 计算时/分/秒/毫秒
       hours = int(diff_ms // 3600000)
@@ -325,13 +338,6 @@ class Scheduler:
       if diff_ms <= 3000 and not self._preheated:
         self._preheated = True
         logger.debug("TCP 预热（浏览器已维护连接池）")
-
-      # ---- 到点：开始抢购 ----
-      if diff_ms <= self.config.advance_ms and not self._is_running:
-        self._is_running = True
-        logger.info(f"开始抢购! (提前{self.config.advance_ms}ms)")
-        await self._start_snipe()
-        break  # 退出倒计时循环
 
       await asyncio.sleep(0.5)  # 每 0.5 秒更新一次
 
@@ -461,7 +467,19 @@ class Scheduler:
               logger.warning("验证码自动识别失败，等待手动处理...")
               await async_notify("GLM 需要验证", "请手动完成验证码或刷新页面重试")
 
-          break  # 支付弹窗 → 停止点击循环
+          # 支付弹窗：先检查二维码（确认按钮点击后 QR 可能已出现），再停止循环
+          if modal_type == "payment":
+            if await self.dom.has_qr_code():
+              logger.info("检测到支付二维码!")
+              self._order_created = True
+              if self.browser:
+                self.browser.order_created = True
+              await async_play_alert()
+              await async_notify(
+                  "GLM 抢购成功！",
+                  "支付二维码已出现，快去扫码！",
+              )
+          break
 
         elif self._modal_visible:
           # 弹窗消失了
@@ -478,7 +496,7 @@ class Scheduler:
 
           self._last_modal_type = None
 
-        # ---- 4. 检测支付二维码（抢购成功标志）----
+        # ---- 4. 检测支付二维码（兜底：弹窗未检测到但 QR 已出现的情况）----
         if await self.dom.detect_qr_code():
           logger.info("检测到支付二维码!")
           self._order_created = True
@@ -719,14 +737,24 @@ class Scheduler:
     """
     if not self.dom:
       return
-    if not self._is_in_purchase_time():  # 不在抢购窗口
+    if not self._is_in_purchase_time():
       return
+
+    # 页面被手动刷新 → 清掉旧状态（_modal_visible 等），重新进入抢购
+    if self.browser and self.browser.page_refreshed:
+      self.browser.page_refreshed = False
+      logger.info("页面已刷新，重置状态并准备重新抢购...")
+      self._modal_visible = False
+      self._order_created = False
+      self._confirmed_sold_out = False
+      self._is_running = False
+
     if (
-        self._is_running          # 已在运行
-        or self._order_created    # 订单已创建
-        or self._modal_visible    # 有弹窗
-        or self._confirmed_sold_out  # 已确认售罄
-        or self._plan_switch_pending # 正在切换套餐
+        self._is_running
+        or self._order_created
+        or self._modal_visible
+        or self._confirmed_sold_out
+        or self._plan_switch_pending
     ):
       return  # 不满足触发条件
 
@@ -792,16 +820,16 @@ class Scheduler:
         logger.info("当前正是抢购时间! 立即开始!")
         self._is_running = True
         await self._start_snipe()
-        # 抢购成功后退出；否则（如页面刷新）等页面恢复后重新触发
-        if not self._order_created:
-          for _ in range(15):  # 最多等 30 秒
-            await asyncio.sleep(2)
-            await self.auto_recovery_check()
-            await self.auto_snipe_on_ready()
-            if self._order_created or self._is_running:
-              break
-        if not self._order_created:
-          return
+        if self._order_created:
+          return  # 抢购成功 → 退出，main.py 保持浏览器打开等待扫码
+        # 失败：等页面恢复后重新触发
+        for _ in range(15):  # 最多等 30 秒
+          await asyncio.sleep(2)
+          await self.auto_recovery_check()
+          await self.auto_snipe_on_ready()
+          if self._order_created or self._is_running:
+            break
+        return
 
     # 7. 打印配置信息
     plan_list = "，".join(
@@ -820,8 +848,10 @@ class Scheduler:
 
     # 8. 主循环：倒计时 → 抢购 → 恢复 → 探测 → 等待下一轮
     while True:
-      # 8a. 倒计时（阻塞直到开始抢购）
-      await self._run_countdown()
+      # 8a. 倒计时（阻塞直到开始抢购；页面刷新唤醒后可跳过）
+      if not self._skip_countdown:
+        await self._run_countdown()
+      self._skip_countdown = False
 
       # 8b. 抢购结束后的 2 分钟维护期：自动恢复 + 自动重触发
       for _ in range(60):  # 60 × 2s = 2分钟
@@ -853,7 +883,21 @@ class Scheduler:
           self.browser.order_created = False
           self.browser.force_pay_dialog_called = False
         logger.info(f"等待 {wait_s:.0f}s 到下一轮...")
-        await asyncio.sleep(wait_s)
+        # 分片等待，每 2 秒检查页面是否被刷新
+        remaining = wait_s
+        refreshed = False
+        while remaining > 0:
+          chunk = min(remaining, 2.0)
+          await asyncio.sleep(chunk)
+          remaining -= chunk
+          if self.browser and self.browser.page_refreshed:
+            logger.info("等待期间检测到页面刷新，跳过倒计时直接重试...")
+            # 不在此消费 page_refreshed，留给 auto_snipe_on_ready() 做状态重置
+            refreshed = True
+            break
+        if refreshed:
+          self._skip_countdown = True
+          continue  # 回到 while True 顶部，跳过 _run_countdown，进入 maintenance
 
   async def _delayed_time_calibration(self) -> None:
     """延迟 2 秒后校准服务器时间（避免阻塞启动）."""

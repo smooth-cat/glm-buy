@@ -9,17 +9,19 @@
   4. 服务器时间校准
 
 基础 URL: https://open.bigmodel.cn
+测试时可通过 GLM_BUY_API_BASE 环境变量覆盖.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone  # 时间处理（服务器时间校准用）
 
 import httpx  # 现代 Python HTTP 客户端（支持 HTTP/2，比 requests 更快）
 from loguru import logger
 
-# 智谱 AI 开放平台的 API 基础地址
-BASE_URL = "https://open.bigmodel.cn"
+# 智谱 AI 开放平台的 API 基础地址（测试时可通过环境变量覆盖）
+BASE_URL = os.environ.get("GLM_BUY_API_BASE", "https://open.bigmodel.cn")
 
 
 class APIClient:
@@ -135,24 +137,22 @@ class APIClient:
     从响应头的 Date 字段提取服务器时间.
     返回: 偏差毫秒数（正数 = 本地比服务器慢）.
     """
+    from email.utils import parsedate_to_datetime
     try:
       resp = self._client.head(BASE_URL)  # HEAD 请求只返回头，不返回 body
       date_str = resp.headers.get("date", "")  # HTTP Date 头
       if date_str:
-        # 解析 HTTP Date 格式: "Mon, 17 May 2026 02:00:00 GMT"
-        server_time = datetime.strptime(
-            date_str, "%a, %d %b %Y %H:%M:%S %Z"
-        ).replace(tzinfo=timezone.utc)
-        # 获取本地 UTC 时间
+        # parsedate_to_datetime 专门解析 HTTP Date 头，不依赖系统 locale
+        server_time = parsedate_to_datetime(date_str)
+        if server_time.tzinfo is None:
+          server_time = server_time.replace(tzinfo=timezone.utc)
         local_time = datetime.now(timezone.utc)
-        # 计算偏差（毫秒）
         offset_ms = int((server_time - local_time).total_seconds() * 1000)
         logger.info(
             f"时间偏差: {offset_ms}ms "
             f"({'本地慢' if offset_ms > 0 else '本地快'})"
         )
         if abs(offset_ms) > 1000:
-          # 偏差超过1秒时警告
           logger.warning(
               f"本地时间偏差较大 ({offset_ms}ms)，建议校准系统时间"
           )
