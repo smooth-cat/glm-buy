@@ -147,16 +147,22 @@ async def solve_captcha(page, mouse, solver, max_attempts: int = 3) -> bool:
   """
   tcaptcha_sel = S["opera"]
   logger.info(f"等待验证码弹窗出现（监控 {tcaptcha_sel} 元素）...")
-  try:
-    tcaptcha, _ = await _find_in_frames(page, tcaptcha_sel)
+  tcaptcha = None
+  deadline = asyncio.get_event_loop().time() + 15
+  while not tcaptcha:
+    tcaptcha, tcaptcha_frame = await _find_in_frames(page, tcaptcha_sel)
     if not tcaptcha:
-      raise Exception(f"未找到 {tcaptcha_sel}")
-    await tcaptcha.wait_for(state="visible", timeout=15000)
-    logger.info("验证码弹窗已出现")
-    await asyncio.sleep(config.captcha_appear_delay_ms / 1000)
-  except Exception as e:
-    logger.error(f"验证码弹窗未在 15 秒内出现: {e}")
-    return False
+      if asyncio.get_event_loop().time() >= deadline:
+        logger.error(f"验证码弹窗未在 15 秒内出现: 未找到 {tcaptcha_sel}")
+        return False
+      await asyncio.sleep(0.5)
+  # 等到元素真正可见（iframe 中可能 DOM 已存在但未渲染）
+  try:
+    await tcaptcha.wait_for(state="visible", timeout=10000)
+  except Exception:
+    pass
+  logger.info("验证码弹窗已出现")
+  await asyncio.sleep(config.captcha_appear_delay_ms / 1000)
 
   for attempt in range(1, max_attempts + 1):
     logger.info(f"--- 第 {attempt}/{max_attempts} 次识别尝试 ---")
@@ -242,11 +248,23 @@ async def _capture_captcha(page):
   """截取验证码图片，返回 (bytes, offset_x, offset_y)."""
   offset_x, offset_y = 0, 0
 
-  bg_img, _ = await _find_in_frames(page, S["opera"])
+  bg_img, frame = await _find_in_frames(page, S["opera"])
   if bg_img:
     box = await bg_img.bounding_box()
     if box:
       offset_x, offset_y = box["x"], box["y"]
+      # iframe 内元素：补上 iframe 在父页面中的偏移
+      if frame and frame is not page:
+        try:
+          iframe_box = await frame.frame_element().bounding_box()
+          if iframe_box:
+            offset_x += iframe_box["x"]
+            offset_y += iframe_box["y"]
+            logger.info(
+                f"iframe 偏移: ({iframe_box['x']:.0f},{iframe_box['y']:.0f})"
+            )
+        except Exception:
+          pass
       screenshot = await bg_img.screenshot()
       logger.info(f"截取 {S['opera']} (offset=({offset_x:.0f},{offset_y:.0f}))")
       return screenshot, offset_x, offset_y
@@ -287,21 +305,22 @@ async def _extract_prompt(page) -> str:
 
 
 async def _wait_captcha_loading(page) -> None:
-  """等待验证码加载完成：loading 出现 → 消失."""
+  """等待验证码加载完成：若 loading 可见则等它消失，否则忽略（加载太快已结束）."""
   try:
-    opera, frame = await _find_in_frames(page, S["opera"])
-    if not opera or not frame:
-      await asyncio.sleep(2)
+    _, frame = await _find_in_frames(page, S["opera"])
+    if not frame:
+      await asyncio.sleep(0.5)
       return
-    # visible: 兼容 DOM 创建 + display:none→flex 两种出现方式
-    await frame.locator(S["opera_loading"]).wait_for(state="visible", timeout=3000)
-    logger.info("验证码加载中")
-    # hidden: 兼容 DOM 删除 + display:flex→none 两种消失方式
-    await frame.locator(S["opera_loading"]).wait_for(state="hidden", timeout=10000)
-    logger.info("验证码加载完成")
+    loading = frame.locator(S["opera_loading"]).first
+    # 如果 loading 当前可见，等它消失；不可见说明已经加载完（或太快跳过了）
+    if await loading.count() > 0 and await loading.is_visible():
+      logger.info("验证码加载中...")
+      await loading.wait_for(state="hidden", timeout=8000)
+      logger.info("验证码加载完成")
+    # 否则已经加载好了，不需要等
   except Exception as e:
-    logger.debug(f"等待加载异常（回退 2s）: {e}")
-    await asyncio.sleep(2)
+    logger.debug(f"等待加载异常（回退 0.5s）: {e}")
+    await asyncio.sleep(0.5)
 
 
 async def _click_confirm_button(page, mouse) -> None:

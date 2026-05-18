@@ -56,6 +56,8 @@ class CaptchaSolver:
     raw = self._split_merged(raw)
     if [t[4] for t in raw] != raw_texts:
       logger.info(f"拆分后:  {[t[4] for t in raw]}")
+    # 拆分后对子区域重新 OCR，修正均分带来的位置偏差
+    raw = self._refine_split_positions(raw, img_array)
 
     # 建立映射
     word_positions = self._build_map(raw)
@@ -73,6 +75,7 @@ class CaptchaSolver:
     preprocessed_array = self._bytes_to_numpy(preprocessed)
     raw2 = self._predict(preprocessed_array)
     raw2 = self._split_merged(raw2)
+    raw2 = self._refine_split_positions(raw2, preprocessed_array)
     word_positions2 = self._build_map(raw2)
     return self._match_targets(word_positions2, target_chars) or []
 
@@ -129,6 +132,95 @@ class CaptchaSolver:
         # 几乎方形 → 保留原结果
         result.append((x1, y1, x2, y2, text, conf, cx, cy))
     return result
+
+  # ==================== 拆分后子区域重识别（修正位置）====================
+
+  def _refine_split_positions(
+      self,
+      items: list[tuple[int, int, int, int, str, float, int, int]],
+      img_array: np.ndarray,
+  ) -> list[tuple[int, int, int, int, str, float, int, int]]:
+    """
+    修正拆分后的位置偏差.
+    多字 item（未被 _split_merged 拆开的）→ 均分 + 各子区域 OCR.
+    单字 item → 子区域 OCR 修正均分带来的坐标误差.
+    """
+    h, w = img_array.shape[:2]
+    changed = False
+    refined: list[tuple[int, int, int, int, str, float, int, int]] = []
+    for x1, y1, x2, y2, text, conf, cx, cy in items:
+      n = len(text)
+      if n <= 1:
+        # 单字：裁剪子区域 OCR 修正坐标
+        pad = 4
+        sx1, sy1 = max(0, x1 - pad), max(0, y1 - pad)
+        sx2, sy2 = min(w, x2 + pad), min(h, y2 + pad)
+        sub_img = img_array[sy1:sy2, sx1:sx2]
+        if sub_img.size == 0:
+          refined.append((x1, y1, x2, y2, text, conf, cx, cy))
+          continue
+        sub_results = self._predict(sub_img)
+        best = None
+        for r in sub_results:
+          if r[4] == text:
+            best = r
+            break
+        if best is None and sub_results:
+          best = sub_results[0]
+        if best:
+          changed = True
+          rx1, ry1, rx2, ry2, _rtext, _rconf, rcx, rcy = best
+          refined.append((
+              sx1 + rx1, sy1 + ry1, sx1 + rx2, sy1 + ry2,
+              text, conf,
+              sx1 + rcx, sy1 + rcy,
+          ))
+        else:
+          refined.append((x1, y1, x2, y2, text, conf, cx, cy))
+      else:
+        # 多字：均分后各子区域 OCR
+        bw, bh = x2 - x1, y2 - y1
+        horizontal = bw >= bh
+        for i in range(n):
+          if horizontal:
+            cw = bw / n
+            ix1, ix2 = int(x1 + i * cw), int(x1 + (i + 1) * cw)
+            iy1, iy2 = y1, y2
+          else:
+            ch = bh / n
+            ix1, ix2 = x1, x2
+            iy1, iy2 = int(y1 + i * ch), int(y1 + (i + 1) * ch)
+          pad = 4
+          sx1, sy1 = max(0, ix1 - pad), max(0, iy1 - pad)
+          sx2, sy2 = min(w, ix2 + pad), min(h, iy2 + pad)
+          sub_img = img_array[sy1:sy2, sx1:sx2]
+          if sub_img.size == 0:
+            refined.append((ix1, iy1, ix2, iy2, text[i], conf,
+                            (ix1 + ix2) // 2, (iy1 + iy2) // 2))
+            continue
+          sub_results = self._predict(sub_img)
+          best = None
+          for r in sub_results:
+            if r[4] == text[i]:
+              best = r
+              break
+          if best is None and sub_results:
+            best = sub_results[0]
+          if best:
+            changed = True
+            rx1, ry1, rx2, ry2, _rtext, _rconf, rcx, rcy = best
+            refined.append((
+                sx1 + rx1, sy1 + ry1, sx1 + rx2, sy1 + ry2,
+                text[i], conf,
+                sx1 + rcx, sy1 + rcy,
+            ))
+          else:
+            refined.append((ix1, iy1, ix2, iy2, text[i], conf,
+                            (ix1 + ix2) // 2, (iy1 + iy2) // 2))
+    if changed:
+      new_positions = [(t[4], (t[6], t[7])) for t in refined]
+      logger.info(f"位置修正: {new_positions}")
+    return refined
 
   # ==================== 映射 & 匹配 ====================
 

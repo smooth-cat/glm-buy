@@ -47,12 +47,12 @@ class Config:
   captcha_click_interval_ms: int = 300
   # 验证码确认前延迟 (ms): 点击完文字后，等待再点"确定"按钮
   captcha_confirm_delay_ms: int = 100
-  # 验证码出现后延迟 (ms): 弹窗出现后等待图片渲染
-  captcha_appear_delay_ms: int = 300
+  # 验证码出现后延迟 (ms): 弹窗出现后等待图片渲染（iframe 验证码需更长时间）
+  captcha_appear_delay_ms: int = 1000
   # 验证码确定后延迟 (ms): 点"确定"后等待页面反馈
   captcha_verify_delay_ms: int = 1000
-  # 验证码刷新后延迟 (ms): 点刷新按钮后等待新图片加载
-  captcha_refresh_delay_ms: int = 300
+  # 验证码刷新后延迟 (ms): _wait_captcha_loading 已等 loading 消失，此延迟补充
+  captcha_refresh_delay_ms: int = 50
 
 
 def _env_int(name: str, default: int) -> int:
@@ -138,7 +138,7 @@ CAPTCHA_SELECTORS = {
     # 确认按钮文字
     "confirm_btn_text": "确定",
 
-    # # 刷新按钮
+    # 刷新按钮
     # "action_refresh": ".tc-action--refresh",
     # # 操作区容器
     # "opera": ".tc-opera",
