@@ -384,6 +384,14 @@ class Scheduler:
     # 移除所有 disabled 属性和禁用样式（对应 JS 版 removeAllDisabled）
     if self.browser:
       await self.browser.remove_all_disabled()
+      # 强制 Vue 组件中 soldOut 为 false，防止预热期旧状态拦截点击
+      n = await self.browser.force_sold_out_false()
+      if n:
+        logger.info(f"[Vue] 强制 soldOut=false ({n} 个字段)")
+      # 清除 Vue 组件中的 isServerBusy 状态
+      m = await self.browser.patch_vue_server_busy()
+      if m:
+        logger.info(f"[Vue] 解除 isServerBusy ({m} 个组件)")
 
     # 第二步：确保 productId 就绪
     if not self.product_mgr.get_product_id(
@@ -576,6 +584,11 @@ class Scheduler:
       return
 
     logger.info("[验证码后] productId 就绪，重新触发购买...")
+    # 注入 productId 到 Vue 组件，防止验证码后数据丢失
+    if self.browser:
+      n = await self.browser.ensure_product_id(self.product_mgr.captured_product_id)
+      if n:
+        logger.info(f"[Vue] 已注入 productId ({n} 个组件)")
     # 重置状态，重新开始抢购
     self._retry_count = 0
     self._force_pay_dialog_called = False
@@ -808,6 +821,7 @@ class Scheduler:
     # 1. 启动浏览器
     self.browser = BrowserManager(
         headless=self.config.headless,
+        devtools=self.config.devtools,
         user_data_dir=self.config.user_data_dir,
         purchase_url=self.config.purchase_url,
         target_hour=self.config.target_hour,

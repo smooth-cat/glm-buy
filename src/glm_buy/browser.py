@@ -42,6 +42,7 @@ class BrowserManager:
   def __init__(
       self,
       headless: bool = False,
+      devtools: bool = True,
       user_data_dir: str = "browser_profile",
       purchase_url: str = "https://open.bigmodel.cn/glm-coding",
       target_hour: int = 10,
@@ -54,12 +55,14 @@ class BrowserManager:
 
     参数:
       headless:       True = 无头模式（不可见），False = 可见窗口（鼠标模拟需要可见）
+      devtools:       是否自动打开开发者工具控制台（仅非 headless 生效）
       user_data_dir:  浏览器用户数据目录（保存 Cookie/登录态）
       purchase_url:   购买页面 URL
       target_hour/minute/second: 目标抢购时间（用于判断 rush window）
       viewport:       浏览器窗口大小，None 时自动检测屏幕分辨率
     """
     self._headless = headless
+    self._devtools = devtools and not headless
     self._user_data_dir = Path(user_data_dir).resolve()
     self._purchase_url = purchase_url
     self._target_hour = target_hour
@@ -139,6 +142,28 @@ class BrowserManager:
   def page_refreshed(self, value: bool) -> None:
     self._page_refreshed = value
 
+  def _build_launch_args(self) -> list[str]:
+    return [
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-features=Translate",
+        "--disable-background-networking",
+    ]
+
+  def _open_devtools(self) -> None:
+    """通过 AppleScript 按 Cmd+Option+I 打开 Chrome DevTools."""
+    if not self._devtools:
+      return
+    try:
+      import subprocess
+      subprocess.run([
+          "osascript", "-e",
+          'tell application "System Events" to tell process "Chromium"'
+          ' to keystroke "i" using {command down, option down}',
+      ], capture_output=True, timeout=3)
+    except Exception:
+      pass
+
   # ==================== 浏览器生命周期 ====================
 
   async def start(self) -> Page:
@@ -173,12 +198,7 @@ class BrowserManager:
               headless=self._headless,
               viewport=viewport,  # type: ignore[arg-type]
               locale="zh-CN",
-              args=[
-                  "--no-first-run",                    # 跳过首次运行向导
-                  "--no-default-browser-check",        # 跳过默认浏览器检查
-                  "--disable-features=Translate",       # 禁用翻译提示
-                  "--disable-background-networking",    # 减少后台网络
-              ],
+              args=self._build_launch_args(),
           ),
           timeout=60.0,  # 60秒超时（首次启动可能较慢）
       )
@@ -195,7 +215,9 @@ class BrowserManager:
         logger.error(f"浏览器意外关闭: {e}")
       raise
 
-    # 第三步：创建新标签页并设置请求拦截
+    # 第三步：关掉默认空白页，创建新标签页（触发 devtools 在新页打开）
+    for p in self._context.pages:
+      await p.close()
     self._page = await self._context.new_page()
     await self._setup_routes()       # 设置 API 响应拦截
     await self._setup_auth_capture()  # 设置 Authorization 头捕获
@@ -205,7 +227,10 @@ class BrowserManager:
     await self._page.goto(self._purchase_url, wait_until="load")
     # 注册刷新监听，并立即重置标志（goto 的 load 事件会在注册后触发）
     self._page.on("load", lambda _: setattr(self, "_page_refreshed", True))
+    self._page.on("load", lambda _: self._open_devtools())  # 刷新后重新打开 devtools
     self._page_refreshed = False
+    await asyncio.sleep(0.5)
+    self._open_devtools()  # 首次打开 devtools
     logger.info(f"当前 URL: {self._page.url}")
 
     # 处理限流页面：如果被重定向到 rate-limit，则跳回购买页
@@ -251,6 +276,171 @@ class BrowserManager:
         el.style.pointerEvents = 'auto';
         el.style.opacity = '1';
       });
+    }""")
+
+  # ==================== Vue 组件状态直接操作 ====================
+
+  async def force_sold_out_false(self) -> int:
+    """遍历 Vue 组件树，将 soldOut 类属性强制设为 false（对应 JS 版 forceSoldOutFalse）."""
+    if not self._page:
+      return 0
+    return await self._page.evaluate("""() => {
+      const app = document.querySelector('#app');
+      if (!app) return 0;
+      let vr = null;
+      if (app.__vue__) vr = { ver: 2, root: app.__vue__ };
+      else if (app.__vue_app__ && app.__vue_app__._instance) vr = { ver: 3, root: app.__vue_app__._instance };
+      if (!vr) return 0;
+
+      function walkVueTree(vm, ver, depth, fn) {
+        if (!vm || depth > 10) return;
+        fn(vm, ver);
+        if (ver === 2) {
+          for (const child of (vm.$children || [])) walkVueTree(child, 2, depth + 1, fn);
+        } else {
+          const walkVNode = (vnode, d) => {
+            if (!vnode || d > 12) return;
+            if (vnode.component) walkVueTree(vnode.component, 3, d, fn);
+            if (Array.isArray(vnode.children))
+              vnode.children.forEach(c => c && typeof c === 'object' && walkVNode(c, d + 1));
+          };
+          if (vm.subTree) walkVNode(vm.subTree, depth + 1);
+        }
+      }
+
+      function getVMData(vm, ver) {
+        if (ver === 2) return vm.$data || {};
+        return vm.proxy || {};
+      }
+
+      let patched = 0;
+      walkVueTree(vr.root, vr.ver, 0, (vm, ver) => {
+        const data = getVMData(vm, ver);
+        for (const key of Object.keys(data)) {
+          if (/soldOut|isSoldOut|sold_out|is_sold_out/i.test(key) && data[key] === true) {
+            try {
+              if (ver === 2) vm[key] = false;
+              else if (vm.proxy) vm.proxy[key] = false;
+              patched++;
+            } catch (e) {}
+          }
+        }
+      });
+      return patched;
+    }""")
+
+  async def ensure_product_id(self, product_id: str) -> int:
+    """注入 productId 到 Vue 组件中为空的字段（对应 JS 版 ensureProductId）."""
+    if not self._page or not product_id:
+      return 0
+    return await self._page.evaluate("""(pid) => {
+      const app = document.querySelector('#app');
+      if (!app) return 0;
+      let vr = null;
+      if (app.__vue__) vr = { ver: 2, root: app.__vue__ };
+      else if (app.__vue_app__ && app.__vue_app__._instance) vr = { ver: 3, root: app.__vue_app__._instance };
+      if (!vr) return 0;
+
+      function walkVueTree(vm, ver, depth, fn) {
+        if (!vm || depth > 10) return;
+        fn(vm, ver);
+        if (ver === 2) {
+          for (const child of (vm.$children || [])) walkVueTree(child, 2, depth + 1, fn);
+        } else {
+          const walkVNode = (vnode, d) => {
+            if (!vnode || d > 12) return;
+            if (vnode.component) walkVueTree(vnode.component, 3, d, fn);
+            if (Array.isArray(vnode.children))
+              vnode.children.forEach(c => c && typeof c === 'object' && walkVNode(c, d + 1));
+          };
+          if (vm.subTree) walkVNode(vm.subTree, depth + 1);
+        }
+      }
+
+      function getVMData(vm, ver) {
+        if (ver === 2) return vm.$data || {};
+        return vm.proxy || {};
+      }
+
+      let fixed = 0;
+      walkVueTree(vr.root, vr.ver, 0, (vm, ver) => {
+        const data = getVMData(vm, ver);
+        for (const key of Object.keys(data)) {
+          if (/product.?id/i.test(key) && !data[key]) {
+            try {
+              if (ver === 2) vm[key] = pid;
+              else if (vm.proxy) vm.proxy[key] = pid;
+              fixed++;
+            } catch (e) {}
+          }
+        }
+      });
+      if (fixed === 0) {
+        walkVueTree(vr.root, vr.ver, 0, (vm, ver) => {
+          if (fixed > 0) return;
+          const data = getVMData(vm, ver);
+          for (const key of Object.keys(data)) {
+            if (/product.?id/i.test(key)) {
+              try {
+                if (ver === 2) vm[key] = pid;
+                else if (vm.proxy) vm.proxy[key] = pid;
+                fixed++;
+                return;
+              } catch (e) {}
+            }
+          }
+        });
+      }
+      return fixed;
+    }""", product_id)
+
+  async def patch_vue_server_busy(self) -> int:
+    """遍历 Vue 组件树，将 isServerBusy 强制设为 false."""
+    if not self._page:
+      return 0
+    if self._force_pay_dialog_called or self._order_created:
+      return 0
+    return await self._page.evaluate("""() => {
+      const app = document.querySelector('#app');
+      if (!app) return 0;
+      let vr = null;
+      if (app.__vue__) vr = { ver: 2, root: app.__vue__ };
+      else if (app.__vue_app__ && app.__vue_app__._instance) vr = { ver: 3, root: app.__vue_app__._instance };
+      if (!vr) return 0;
+
+      function walkVueTree(vm, ver, depth, fn) {
+        if (!vm || depth > 10) return;
+        fn(vm, ver);
+        if (ver === 2) {
+          for (const child of (vm.$children || [])) walkVueTree(child, 2, depth + 1, fn);
+        } else {
+          const walkVNode = (vnode, d) => {
+            if (!vnode || d > 12) return;
+            if (vnode.component) walkVueTree(vnode.component, 3, d, fn);
+            if (Array.isArray(vnode.children))
+              vnode.children.forEach(c => c && typeof c === 'object' && walkVNode(c, d + 1));
+          };
+          if (vm.subTree) walkVNode(vm.subTree, depth + 1);
+        }
+      }
+
+      function getVMData(vm, ver) {
+        if (ver === 2) return vm.$data || {};
+        return vm.proxy || {};
+      }
+
+      let patched = 0;
+      walkVueTree(vr.root, vr.ver, 0, (vm, ver) => {
+        const data = getVMData(vm, ver);
+        if (data.isServerBusy === true) {
+          try {
+            if (ver === 2) vm.isServerBusy = false;
+            else if (vm.proxy) vm.proxy.isServerBusy = false;
+            patched++;
+          } catch (e) {}
+        }
+      });
+      return patched;
     }""")
 
   # ==================== 抢购窗口判断 ====================

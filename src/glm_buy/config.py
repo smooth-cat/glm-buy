@@ -41,6 +41,7 @@ class Config:
   auto_refresh: bool = True
   auto_refresh_seconds_before: int = 10
   headless: bool = False
+  devtools: bool = True
   user_data_dir: str = "browser_profile"
   purchase_url: str = "https://open.bigmodel.cn/glm-coding"
   # 验证码点击间隔 (ms): 依次点击各文字之间的停顿
