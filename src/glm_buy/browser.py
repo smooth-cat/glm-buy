@@ -234,6 +234,25 @@ class BrowserManager:
     if self._page:
       await self._page.goto(self._purchase_url, wait_until="domcontentloaded")
 
+  async def remove_all_disabled(self) -> None:
+    """移除页面上所有按钮的 disabled 属性和禁用样式（对应 JS 版 removeAllDisabled）."""
+    if not self._page:
+      return
+    await self._page.evaluate("""() => {
+      document.querySelectorAll('button[disabled], a[disabled], input[disabled]').forEach(el => {
+        el.removeAttribute('disabled');
+        el.disabled = false;
+        el.classList.remove('disabled', 'is-disabled', 'btn-disabled');
+        if (el.style.pointerEvents === 'none') el.style.pointerEvents = 'auto';
+        if (el.style.opacity === '0.5' || el.style.opacity === '0.6') el.style.opacity = '1';
+      });
+      document.querySelectorAll('.disabled, .is-disabled, .btn-disabled, .sold-out').forEach(el => {
+        el.classList.remove('disabled', 'is-disabled', 'btn-disabled', 'sold-out');
+        el.style.pointerEvents = 'auto';
+        el.style.opacity = '1';
+      });
+    }""")
+
   # ==================== 抢购窗口判断 ====================
 
   def _is_in_rush_window(self) -> bool:

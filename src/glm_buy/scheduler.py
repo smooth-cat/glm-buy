@@ -66,6 +66,7 @@ class Scheduler:
     self._force_pay_dialog_called = False    # 是否已触发支付弹窗
     self._last_modal_type: str | None = None # 上次弹窗类型（captcha / payment）
     self._pid_fetch_attempt = 0             # productId 主动获取尝试次数
+    self._time_offset_ms = 0                # 本地与服务器的时间偏差（正数=本地慢）
 
   # ==================== 便捷方法 ====================
 
@@ -277,10 +278,18 @@ class Scheduler:
     while self._countdown_active:
       diff_ms = (target - datetime.now()).total_seconds() * 1000
 
-      # ---- 到点：开始抢购（窗口: [advance_ms 之前, 1 个轮询周期之后]）----
-      if not self._is_running and -600 <= diff_ms <= self.config.advance_ms:
+      # ---- 到点：开始抢购（提前量含时间偏差补偿）----
+      effective_advance = self.config.advance_ms + self._time_offset_ms
+      if not self._is_running and -600 <= diff_ms <= effective_advance:
         self._is_running = True
-        logger.info(f"开始抢购! (距目标{abs(diff_ms):.0f}ms)")
+        logger.info(
+            f"开始抢购! (距目标{abs(diff_ms):.0f}ms, "
+            f"advance={self.config.advance_ms}ms"
+            + (
+                f"+offset={self._time_offset_ms:+d}ms"
+                if self._time_offset_ms else ""
+            ) + ")"
+        )
         await self._start_snipe()
         break  # 退出倒计时循环
 
@@ -372,6 +381,10 @@ class Scheduler:
     # 这会触发页面的 API 调用，从而捕获 productId
     await self._select_billing_period()
 
+    # 移除所有 disabled 属性和禁用样式（对应 JS 版 removeAllDisabled）
+    if self.browser:
+      await self.browser.remove_all_disabled()
+
     # 第二步：确保 productId 就绪
     if not self.product_mgr.get_product_id(
         self._current_plan(), self._current_period()
@@ -435,16 +448,24 @@ class Scheduler:
           # 每10次打一次日志，减少刷屏
           logger.info(f"第 {self._retry_count} 次尝试...")
 
+        # 每轮移除 disabled 属性（对应 JS 版 removeAllDisabled，防止 Vue 状态拦截点击）
+        if self.browser:
+          await self.browser.remove_all_disabled()
+
         # ---- 1. 查找并点击购买按钮 ----
         coords = await self.dom.find_purchase_button(self._current_plan())
         if coords:
           await self.mouse.click(coords[0], coords[1])
           logger.info("已点击购买按钮!")
+        elif self._retry_count % 30 == 1:
+          logger.info(f"未找到购买按钮 (第{self._retry_count}次)")
 
         # ---- 2. 查找并点击确认按钮（弹窗中的"立即支付"等）----
         confirm_coords = await self.dom.find_confirm_button()
         if confirm_coords:
           await self.mouse.click(confirm_coords[0], confirm_coords[1])
+        elif self._retry_count % 30 == 1:
+          logger.info(f"未找到确认按钮 (第{self._retry_count}次)")
 
         # ---- 3. 检测弹窗 ----
         modal_type = await self.dom.detect_modal()
@@ -902,7 +923,7 @@ class Scheduler:
   async def _delayed_time_calibration(self) -> None:
     """延迟 2 秒后校准服务器时间（避免阻塞启动）."""
     await asyncio.sleep(2)
-    self.api_client.calibrate_time()
+    self._time_offset_ms = self.api_client.calibrate_time()
 
   async def _periodic_pid_check(self) -> None:
     """

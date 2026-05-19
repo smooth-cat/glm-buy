@@ -131,35 +131,56 @@ class APIClient:
       logger.debug(f"[check] 校验异常: {e}")
       return True
 
-  def calibrate_time(self) -> int:
+  def calibrate_time(self, samples: int = 3) -> int:
     """
-    HEAD / — 获取服务器时间，计算与本地时间的偏差.
-    从响应头的 Date 字段提取服务器时间.
+    NTP 式多点采样法测量本地与服务器的时间偏差.
+
+    每次 HEAD 请求记录 t1(发前) 和 t4(收后)，结合服务器 Date 头 t2:
+      offset = t2 - (t1 + t4) / 2   (NTP 公式，对称延迟抵消)
+      rtt    = t4 - t1
+
+    取多次采样中偏移量最大的一次（网络延迟使测量值偏小，最大值最接近真实偏差）.
     返回: 偏差毫秒数（正数 = 本地比服务器慢）.
     """
     from email.utils import parsedate_to_datetime
-    try:
-      resp = self._client.head(BASE_URL)  # HEAD 请求只返回头，不返回 body
-      date_str = resp.headers.get("date", "")  # HTTP Date 头
-      if date_str:
-        # parsedate_to_datetime 专门解析 HTTP Date 头，不依赖系统 locale
+
+    offsets: list[int] = []
+    rtts: list[int] = []
+    for i in range(samples):
+      try:
+        t1 = datetime.now(timezone.utc)
+        resp = self._client.head(BASE_URL)
+        t4 = datetime.now(timezone.utc)
+        date_str = resp.headers.get("date", "")
+        if not date_str:
+          continue
         server_time = parsedate_to_datetime(date_str)
         if server_time.tzinfo is None:
           server_time = server_time.replace(tzinfo=timezone.utc)
-        local_time = datetime.now(timezone.utc)
-        offset_ms = int((server_time - local_time).total_seconds() * 1000)
+        # NTP 偏移公式
+        mid = t1 + (t4 - t1) / 2
+        o = int((server_time - mid).total_seconds() * 1000)
+        r = int((t4 - t1).total_seconds() * 1000)
+        offsets.append(o)
+        rtts.append(r)
         logger.info(
-            f"时间偏差: {offset_ms}ms "
-            f"({'本地慢' if offset_ms > 0 else '本地快'})"
+            f"[{i + 1}/{samples}] offset={o:+d}ms  rtt={r}ms"
         )
-        if abs(offset_ms) > 1000:
-          logger.warning(
-              f"本地时间偏差较大 ({offset_ms}ms)，建议校准系统时间"
-          )
-        return offset_ms
-    except Exception as e:
-      logger.info(f"时间校准失败: {e}")
-    return 0
+      except Exception as e:
+        logger.info(f"[{i + 1}/{samples}] 采样失败: {e}")
+
+    if not offsets:
+      logger.info("时间校准失败：无有效采样")
+      return 0
+
+    # 取最大偏移（最接近真实时钟偏差）
+    best = max(offsets)
+    avg_rtt = sum(rtts) // len(rtts)
+    logger.info(
+        f"时间校准完成: offset={best:+d}ms  rtt≈{avg_rtt}ms  "
+        f"({'本地慢' if best > 0 else '本地快'})  (共{len(offsets)}次采样)"
+    )
+    return best
 
   def close(self) -> None:
     """关闭 HTTP 客户端，释放连接."""
