@@ -963,9 +963,9 @@ class Scheduler:
     # 5. 启动定期 productId 检查（每 3s 一次）
     self._pid_check_task = asyncio.create_task(self._periodic_pid_check())
 
-    # 6. 如果当前已经在抢购窗口内，延迟 2 秒后直接开始抢购
+    # 6. 如果当前已经在抢购窗口内，等 page logo 就绪后 0.3s 再开始
     if self._is_in_purchase_time():
-      await asyncio.sleep(2)  # 等待页面数据加载
+      await asyncio.sleep(1.5)  # 等待页面数据加载
       if not self._confirmed_sold_out:
         logger.info("当前正是抢购时间! 立即开始!")
         self._is_running = True

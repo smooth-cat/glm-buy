@@ -85,8 +85,8 @@ def build_config() -> Config:
           PlanPriority(plan="lite", billing_period="quarterly"),
           # PlanPriority(plan="pro", billing_period="quarterly"),  # 候补
       ],
-      target_hour=_env_int("GLM_BUY_TARGET_HOUR", 19),
-      target_minute=_env_int("GLM_BUY_TARGET_MINUTE", 15),
+      target_hour=_env_int("GLM_BUY_TARGET_HOUR", 10),
+      target_minute=_env_int("GLM_BUY_TARGET_MINUTE", 0),
       target_second=_env_int("GLM_BUY_TARGET_SECOND", 0),
       advance_ms=200,
       retry_interval=100,
@@ -137,7 +137,7 @@ CAPTCHA_SELECTORS = {
 
     # 验证码交互
     # 确认按钮文字
-    "confirm_btn_text": "确定",
+    "confirm_btn": ".tencent-captcha-dy__verify-confirm-btn",
 
     # 刷新按钮
     # "action_refresh": ".tc-action--refresh",

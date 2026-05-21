@@ -326,11 +326,12 @@ async def _wait_captcha_loading(page) -> None:
 async def _click_confirm_button(page, mouse) -> None:
   """在所有 frame 中搜索验证码确认按钮并点击."""
   try:
+    confirm_btn_class = S['confirm_btn']
     await asyncio.sleep(config.captcha_confirm_delay_ms / 1000)
     # 精确匹配 Tencent CAPTCHA 的确认按钮 class
     for frame in [page] + [f for f in page.frames if f != page]:
       try:
-        el = frame.locator(".tencent-captcha-dy__verify-confirm-btn").first
+        el = frame.locator(confirm_btn_class).first
         if await el.count() > 0:
           box = await el.bounding_box()
           if box:
