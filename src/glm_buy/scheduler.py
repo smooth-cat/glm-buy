@@ -64,6 +64,7 @@ class Scheduler:
     self._plan_switch_pending = False        # 套餐切换进行中（互斥锁）
     self._confirmed_sold_out = False         # 是否已确认售罄（永久停止）
     self._force_pay_dialog_called = False    # 是否已触发支付弹窗
+    self._pay_dialog_triggered = False       # 是否已通过 Vue 操作触发支付弹窗
     self._last_modal_type: str | None = None # 上次弹窗类型（captcha / payment）
     self._pid_fetch_attempt = 0             # productId 主动获取尝试次数
     self._time_offset_ms = 0                # 本地与服务器的时间偏差（正数=本地慢）
@@ -225,6 +226,7 @@ class Scheduler:
           self._current_plan(), self._current_period()
       )
       self._retry_count = 0  # 给新套餐完整的重试次数
+      self._pay_dialog_triggered = False  # 新套餐需要重新触发支付弹窗
 
       # 3. 如果还在抢购窗口内，立即重新开始抢购
       if self._is_in_purchase_time():
@@ -388,6 +390,7 @@ class Scheduler:
       n = await self.browser.force_sold_out_false()
       if n:
         logger.info(f"[Vue] 强制 soldOut=false ({n} 个字段)")
+        await asyncio.sleep(0.3)  # 等 Vue nextTick 完成 DOM 重渲染（v-if 切换按钮）
       # 清除 Vue 组件中的 isServerBusy 状态
       m = await self.browser.patch_vue_server_busy()
       if m:
@@ -460,22 +463,16 @@ class Scheduler:
         if self.browser:
           await self.browser.remove_all_disabled()
 
-        # ---- 1. 查找并点击购买按钮 ----
-        coords = await self.dom.find_purchase_button(self._current_plan())
-        if coords:
-          await self.mouse.click(coords[0], coords[1])
-          logger.info("已点击购买按钮!")
-        elif self._retry_count % 30 == 1:
-          logger.info(f"未找到购买按钮 (第{self._retry_count}次)")
+        # ---- 1. 通过 Vue 组件直接打开支付弹窗（绕过 DOM 按钮） ----
+        if not self._pay_dialog_triggered and self._retry_count >= 2:
+          # 等 2 个循环让 batch-preview 响应先到达并更新 Vue state
+          if await self._trigger_pay_dialog_via_vue():
+            self._pay_dialog_triggered = True
+            logger.info("[Vue] 支付弹窗已触发!")
+          elif self._retry_count % 30 == 1:
+            logger.info(f"[Vue] 未能触发支付弹窗 (第{self._retry_count}次)")
 
-        # ---- 2. 查找并点击确认按钮（弹窗中的"立即支付"等）----
-        confirm_coords = await self.dom.find_confirm_button()
-        if confirm_coords:
-          await self.mouse.click(confirm_coords[0], confirm_coords[1])
-        elif self._retry_count % 30 == 1:
-          logger.info(f"未找到确认按钮 (第{self._retry_count}次)")
-
-        # ---- 3. 检测弹窗 ----
+        # ---- 2. 检测弹窗 ----
         modal_type = await self.dom.detect_modal()
         if modal_type:
           if not self._modal_visible:
@@ -496,7 +493,7 @@ class Scheduler:
               logger.warning("验证码自动识别失败，等待手动处理...")
               await async_notify("GLM 需要验证", "请手动完成验证码或刷新页面重试")
 
-          # 支付弹窗：先检查二维码（确认按钮点击后 QR 可能已出现），再停止循环
+          # 支付弹窗：先检查二维码，再停止循环
           if modal_type == "payment":
             if await self.dom.has_qr_code():
               logger.info("检测到支付二维码!")
@@ -542,6 +539,123 @@ class Scheduler:
         await asyncio.sleep(self.config.retry_interval / 1000)
     finally:
       self._snipe_active = False  # 确保循环退出
+
+  async def _delayed_force_pay(self) -> None:
+    """延迟 2 秒后强制弹出支付弹窗（对应 JS 版 setTimeout(forcePayDialog, 2000)）."""
+    await asyncio.sleep(2)
+    if self._order_created or self._confirmed_sold_out:
+      return
+    if self.browser:
+      ok = await self.browser.force_pay_dialog()
+      if ok:
+        logger.info("[Vue] 已直接设置 payDialogVisible=true")
+
+  async def _trigger_pay_dialog_via_vue(self) -> bool:
+    """
+    在 Vue 组件树上直接设置 payDialogVisible=true 打开支付弹窗.
+    与官网 gotoPayFn 逻辑等价，但绕过 disabled/isLimitBuy/loginStatus 检查.
+
+    步骤:
+      1. 遍历 Vue 组件树找到带 selectCardData + allCardDataList 的主组件
+      2. 在 allCardDataList 中按 type + unit 匹配目标套餐
+      3. 设置 disabled=false, isLimitBuy=false
+      4. 设置 selectCardData = 目标套餐
+      5. 找到带 payDialogVisible 的支付子组件（$refs.payComponentRef 或遍历找）
+      6. 设置 payDialogVisible = true
+    """
+    if not self.browser or not self.browser.page:
+      return False
+
+    plan = self._current_plan()
+    # 官网使用 month/quarter/year (不是 monthly/quarterly/yearly)
+    period_map = {"monthly": "month", "quarterly": "quarter", "yearly": "year"}
+    unit = period_map.get(self._current_period(), "quarter")
+
+    result: bool = await self.browser.page.evaluate("""(obj) => {
+      const app = document.querySelector('#app');
+      if (!app) return false;
+      let vr = null;
+      if (app.__vue__) vr = { ver: 2, root: app.__vue__ };
+      else if (app.__vue_app__ && app.__vue_app__._instance) vr = { ver: 3, root: app.__vue_app__._instance };
+      if (!vr) return false;
+
+      function walkVueTree(vm, ver, depth, fn) {
+        if (!vm || depth > 10) return;
+        fn(vm, ver);
+        if (ver === 2) {
+          for (const child of (vm.$children || [])) walkVueTree(child, 2, depth + 1, fn);
+        } else {
+          const walkVNode = (vnode, d) => {
+            if (!vnode || d > 12) return;
+            if (vnode.component) walkVueTree(vnode.component, 3, d, fn);
+            if (Array.isArray(vnode.children))
+              vnode.children.forEach(c => c && typeof c === 'object' && walkVNode(c, d + 1));
+          };
+          if (vm.subTree) walkVNode(vm.subTree, depth + 1);
+        }
+      }
+      function getVMData(vm, ver) {
+        if (ver === 2) return vm.$data || {};
+        return vm.proxy || {};
+      }
+      function setVMProp(vm, ver, key, val) {
+        try {
+          if (ver === 2) vm[key] = val;
+          else if (vm.proxy) vm.proxy[key] = val;
+        } catch (e) {}
+      }
+
+      // 1. 找主组件 (有 selectCardData + allCardDataList)
+      let mainComp = null;
+      walkVueTree(vr.root, vr.ver, 0, (vm, ver) => {
+        if (mainComp) return;
+        const data = getVMData(vm, ver);
+        if ('selectCardData' in data && 'allCardDataList' in data) {
+          mainComp = { vm, ver, data };
+        }
+      });
+      if (!mainComp) return false;
+
+      // 2. 找目标套餐卡片
+      const plans = mainComp.data.allCardDataList || [];
+      let targetCard = null;
+      for (const p of plans) {
+        if (p.type === obj.plan && p.unit === obj.unit) {
+          targetCard = p;
+          break;
+        }
+      }
+      if (!targetCard) return false;
+
+      // 3. 绕过 disabled/isLimitBuy 限制
+      targetCard.disabled = false;
+      targetCard.isLimitBuy = false;
+      mainComp.data.selectCardData = targetCard;
+
+      // 4. 找支付组件并设置 payDialogVisible=true
+      let payComp = null;
+      // 先尝试 $refs.payComponentRef
+      const refs = (mainComp.ver === 2) ? mainComp.vm.$refs : ((mainComp.vm.proxy || mainComp.vm).$refs);
+      if (refs && refs.payComponentRef) {
+        payComp = refs.payComponentRef;
+      }
+      // 回退：遍历找带 payDialogVisible 的组件
+      if (!payComp) {
+        walkVueTree(mainComp.vm, mainComp.ver, 0, (vm, ver) => {
+          if (payComp) return;
+          const data = getVMData(vm, ver);
+          if ('payDialogVisible' in data) payComp = vm;
+        });
+      }
+      if (!payComp) return false;
+
+      setVMProp(payComp, mainComp.ver, 'payDialogVisible', true);
+      return true;
+    }""", {"plan": plan, "unit": unit})
+
+    if result:
+      logger.info("[Vue] 已设置 payDialogVisible=true")
+    return result
 
   async def _select_billing_period(self) -> None:
     """
@@ -592,6 +706,7 @@ class Scheduler:
     # 重置状态，重新开始抢购
     self._retry_count = 0
     self._force_pay_dialog_called = False
+    self._pay_dialog_triggered = False
     if self.browser:
       self.browser.force_pay_dialog_called = False
     self._is_running = True
@@ -910,6 +1025,7 @@ class Scheduler:
         self._sold_out_in_cycle.clear()
         self._current_plan_idx = 0
         self._force_pay_dialog_called = False
+        self._pay_dialog_triggered = False
         self._order_created = False
         self._is_running = False
         self._retry_count = 0

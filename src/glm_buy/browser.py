@@ -443,6 +443,52 @@ class BrowserManager:
       return patched;
     }""")
 
+  async def force_pay_dialog(self) -> bool:
+    """直接操作 Vue 组件设置 payDialogVisible=true（对应 JS 版 forcePayDialog）."""
+    if not self._page:
+      return False
+    if self._force_pay_dialog_called:
+      return False
+    self._force_pay_dialog_called = True
+    return await self._page.evaluate("""() => {
+      const app = document.querySelector('#app');
+      if (!app) return false;
+      let vr = null;
+      if (app.__vue__) vr = { ver: 2, root: app.__vue__ };
+      else if (app.__vue_app__ && app.__vue_app__._instance) vr = { ver: 3, root: app.__vue_app__._instance };
+      if (!vr) return false;
+
+      function walkVueTree(vm, ver, depth, fn) {
+        if (!vm || depth > 10) return;
+        fn(vm, ver);
+        if (ver === 2) {
+          for (const child of (vm.$children || [])) walkVueTree(child, 2, depth + 1, fn);
+        } else {
+          const walkVNode = (vnode, d) => {
+            if (!vnode || d > 12) return;
+            if (vnode.component) walkVueTree(vnode.component, 3, d, fn);
+            if (Array.isArray(vnode.children))
+              vnode.children.forEach(c => c && typeof c === 'object' && walkVNode(c, d + 1));
+          };
+          if (vm.subTree) walkVNode(vm.subTree, depth + 1);
+        }
+      }
+
+      let payComp = null;
+      walkVueTree(vr.root, vr.ver, 0, (vm, ver) => {
+        if (payComp) return;
+        const data = (ver === 2) ? (vm.$data || {}) : (vm.proxy || {});
+        if ('payDialogVisible' in data) payComp = { vm, ver, data };
+      });
+      if (!payComp) return false;
+      if (payComp.data.payDialogVisible) return false;
+      try {
+        if (payComp.ver === 2) payComp.vm.payDialogVisible = true;
+        else if (payComp.vm.proxy) payComp.vm.proxy.payDialogVisible = true;
+      } catch (e) { return false; }
+      return true;
+    }""")
+
   # ==================== 抢购窗口判断 ====================
 
   def _is_in_rush_window(self) -> bool:

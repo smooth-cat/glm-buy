@@ -85,8 +85,8 @@ def build_config() -> Config:
           PlanPriority(plan="lite", billing_period="quarterly"),
           # PlanPriority(plan="pro", billing_period="quarterly"),  # 候补
       ],
-      target_hour=_env_int("GLM_BUY_TARGET_HOUR", 10),
-      target_minute=_env_int("GLM_BUY_TARGET_MINUTE", 0),
+      target_hour=_env_int("GLM_BUY_TARGET_HOUR", 19),
+      target_minute=_env_int("GLM_BUY_TARGET_MINUTE", 15),
       target_second=_env_int("GLM_BUY_TARGET_SECOND", 0),
       advance_ms=200,
       retry_interval=100,
