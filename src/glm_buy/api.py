@@ -83,10 +83,10 @@ class APIClient:
       )
       if resp.is_success:  # HTTP 2xx
         return resp.json()
-      logger.debug(f"batch-preview 返回 HTTP {resp.status_code}")
+      logger.info(f"batch-preview 返回 HTTP {resp.status_code}")
       return None
     except Exception as e:
-      logger.debug(f"batch-preview 请求失败: {e}")
+      logger.info(f"batch-preview 请求失败: {e}")
       return None
 
   def product_info(self) -> dict | None:
@@ -102,10 +102,10 @@ class APIClient:
       )
       if resp.is_success:
         return resp.json()
-      logger.debug(f"productinfo 返回 HTTP {resp.status_code}")
+      logger.info(f"productinfo 返回 HTTP {resp.json()}")
       return None
     except Exception as e:
-      logger.debug(f"productinfo 请求失败: {e}")
+      logger.info(f"productinfo 请求失败: {e}")
       return None
 
   def check_biz_id(self, biz_id: str) -> bool:

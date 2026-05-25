@@ -424,6 +424,15 @@ class Scheduler:
     try:
       while self._snipe_active:
         # ---- 退出条件检查 ----
+        # 页面出现"抢购人数过多" → 立刻刷新页面
+        if self.dom and await self.dom.has_rush_limit_text():
+          logger.info("检测到'抢购人数过多'，刷新页面...")
+          if self.browser:
+            await self.browser.reload()
+          self._snipe_active = False
+          self._is_running = False
+          return  # 退出循环，等 auto_snipe_on_ready 重新触发
+
         # 页面被刷新（手动或自动）→ 重新开始抢购
         if self.browser and self.browser.page_refreshed:
           self.browser.page_refreshed = False
@@ -469,10 +478,18 @@ class Scheduler:
           if await self._trigger_pay_dialog_via_vue():
             self._pay_dialog_triggered = True
             logger.info("[Vue] 支付弹窗已触发!")
+            # 支付弹窗打开后 Vue watcher 会立即调 openVerifyCaptcha()
+            # 必须等验证码出现并处理，再检查支付弹窗
+            if await self._handle_captcha_if_present():
+              # 诊断 + 修复：检查 PayComponent 状态，注入缺失的 productId 并重置 isServerBusy
+              await self._dump_pay_component_state()
+              await self._fix_pay_component_state()
+              # 验证码已处理，等待支付弹窗出现
+              await asyncio.sleep(0.5)
           elif self._retry_count % 30 == 1:
             logger.info(f"[Vue] 未能触发支付弹窗 (第{self._retry_count}次)")
 
-        # ---- 2. 检测弹窗 ----
+        # ---- 2. 检测支付弹窗与二维码 ----
         modal_type = await self.dom.detect_modal()
         if modal_type:
           if not self._modal_visible:
@@ -483,17 +500,12 @@ class Scheduler:
             await async_play_alert()
 
             if modal_type == "captcha":
-              # 自动识别 + 点击验证码
-              logger.info("开始自动识别验证码...")
-              ok = await solve_captcha(self.browser.page, self.mouse, self._captcha_solver)
-              if ok:
-                logger.info("验证码已自动通过，继续抢购...")
+              # 兜底：detect_modal 仍可能抓到 captcha 残留，跳过不做二次识别
+              if self._pay_dialog_triggered:
+                logger.info("[验证码] 跳过重复 captcha 检测，等待支付弹窗...")
                 self._modal_visible = False
                 continue
-              logger.warning("验证码自动识别失败，等待手动处理...")
-              await async_notify("GLM 需要验证", "请手动完成验证码或刷新页面重试")
 
-          # 支付弹窗：先检查二维码，再停止循环
           if modal_type == "payment":
             if await self.dom.has_qr_code():
               logger.info("检测到支付二维码!")
@@ -539,6 +551,158 @@ class Scheduler:
         await asyncio.sleep(self.config.retry_interval / 1000)
     finally:
       self._snipe_active = False  # 确保循环退出
+
+  async def _dump_pay_component_state(self) -> None:
+    """诊断：打印 PayComponent 的关键状态字段."""
+    if not self.browser or not self.browser.page:
+      return
+    try:
+      state = await self.browser.page.evaluate("""() => {
+        const app = document.querySelector('#app');
+        if (!app) return null;
+        let vr = app.__vue_app__?._instance || app.__vue__;
+        if (!vr) return null;
+        const walk = (vm, d) => {
+          if (!vm || d > 10) return null;
+          const data = vm.proxy || vm.$data || {};
+          if ('payDialogVisible' in data && 'captchaVerified' in data)
+            return data;
+          if (vm.subTree) {
+            const w = (vn, dd) => {
+              if (!vn || dd > 12) return null;
+              if (vn.component) { const r = walk(vn.component, dd); if (r) return r; }
+              if (Array.isArray(vn.children))
+                for (const c of vn.children) if (c && typeof c === 'object') { const r = w(c, dd + 1); if (r) return r; }
+              return null;
+            };
+            const r = w(vm.subTree, d + 1); if (r) return r;
+          }
+          if (vm.$children) for (const c of vm.$children) { const r = walk(c, d + 1); if (r) return r; }
+          return null;
+        };
+        const data = walk(vr, 0);
+        if (!data) return null;
+        return {
+          payDialogVisible: data.payDialogVisible,
+          captchaVerified: data.captchaVerified,
+          isServerBusy: data.isServerBusy,
+          isSoldOut: data.isSoldOut,
+          captchaTicket: data.captchaTicket ? 'present' : 'empty',
+          captchaRandstr: data.captchaRandstr ? 'present' : 'empty',
+          cardData_productId: data.cardData?.productId || 'none',
+        };
+      }""")
+      if state:
+        logger.info(
+            f"[诊断] PayComponent: payDialogVisible={state['payDialogVisible']} "
+            f"captchaVerified={state['captchaVerified']} "
+            f"isServerBusy={state['isServerBusy']} "
+            f"isSoldOut={state['isSoldOut']} "
+            f"captchaTicket={state['captchaTicket']} "
+            f"captchaRandstr={state['captchaRandstr']} "
+            f"productId={state['cardData_productId']}"
+        )
+    except Exception as e:
+      logger.info(f"[诊断] 读取 PayComponent 状态失败: {e}")
+
+  async def _fix_pay_component_state(self) -> None:
+    """注入缺失的 productId，重置 isServerBusy，然后重试 payPreviewFn."""
+    if not self.browser or not self.browser.page:
+      return
+    pid = self.product_mgr.captured_product_id
+    if not pid:
+      return
+    try:
+      ok = await self.browser.page.evaluate("""(pid) => {
+        const app = document.querySelector('#app');
+        if (!app) return false;
+        let vr = app.__vue_app__?._instance || app.__vue__;
+        if (!vr) return false;
+        const walk = (vm, d) => {
+          if (!vm || d > 10) return null;
+          const data = vm.proxy || vm.$data || {};
+          if ('payDialogVisible' in data && 'captchaVerified' in data) return vm;
+          if (vm.subTree) {
+            const w = (vn, dd) => {
+              if (!vn || dd > 12) return null;
+              if (vn.component) { const r = walk(vn.component, dd); if (r) return r; }
+              if (Array.isArray(vn.children))
+                for (const c of vn.children) if (c && typeof c === 'object') { const r = w(c, dd + 1); if (r) return r; }
+              return null;
+            };
+            const r = w(vm.subTree, d + 1); if (r) return r;
+          }
+          if (vm.$children) for (const c of vm.$children) { const r = walk(c, d + 1); if (r) return r; }
+          return null;
+        };
+        const vm = walk(vr, 0);
+        if (!vm) return false;
+        const target = vm.proxy || vm;
+        // 注入 productId
+        if (target.cardData && !target.cardData.productId) {
+          target.cardData.productId = pid;
+        }
+        // 重置 isServerBusy
+        target.isServerBusy = false;
+        // 重试 payPreviewFn（captcha ticket 仍然有效）
+        if (typeof target.payPreviewFn === 'function') {
+          target.payPreviewFn();
+          return true;
+        }
+        return false;
+      }""", pid)
+      if ok:
+        logger.info(f"[修复] 已注入 productId={pid}，重置 isServerBusy，重试 payPreviewFn")
+    except Exception as e:
+      logger.info(f"[修复] 失败: {e}")
+
+  async def _handle_captcha_if_present(self, timeout: float = 8.0) -> bool:
+    """
+    支付弹窗打开后，Vue watcher 自动调 openVerifyCaptcha()
+    在此等待验证码出现并自动处理，避免 detect_modal 先抓到支付弹窗.
+    返回 True 表示验证码已处理（或未出现，超时后继续）.
+    """
+    if not self.browser or not self.browser.page:
+      return False
+    selector = ".tencent-captcha__transform"
+    deadline = asyncio.get_event_loop().time() + timeout
+    logger.info("[验证码] 等待验证码弹窗出现...")
+    while asyncio.get_event_loop().time() < deadline:
+      try:
+        el = self.browser.page.locator(selector).first
+        if await el.count() > 0:
+          logger.info("[验证码] 检测到验证码弹窗，开始自动识别...")
+          ok = await solve_captcha(self.browser.page, self.mouse, self._captcha_solver)
+          if ok:
+            logger.info("[验证码] 验证码已自动通过，等待弹窗关闭...")
+            await self._wait_modal_gone("captcha")
+          return True
+      except Exception:
+        pass
+      await asyncio.sleep(0.3)
+    logger.info("[验证码] 未检测到验证码弹窗（超时），继续检查支付弹窗")
+    return False
+
+  async def _wait_modal_gone(self, modal_type: str, timeout: float = 5.0) -> None:
+    """等验证码/支付弹窗从 DOM 中消失（避免立即重检抓到同一个弹窗）."""
+    if not self.browser or not self.browser.page:
+      return
+    selector = (
+        ".tencent-captcha__transform"
+        if modal_type == "captcha"
+        else '[class*="modal"], [class*="dialog"], [role="dialog"]'
+    )
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+      try:
+        el = self.browser.page.locator(selector).first
+        if await el.count() == 0:
+          logger.info(f"[弹窗] {modal_type} 弹窗已关闭")
+          return
+      except Exception:
+        return
+      await asyncio.sleep(0.3)
+    logger.info(f"[弹窗] {modal_type} 弹窗等待超时")
 
   async def _delayed_force_pay(self) -> None:
     """延迟 2 秒后强制弹出支付弹窗（对应 JS 版 setTimeout(forcePayDialog, 2000)）."""
@@ -632,14 +796,27 @@ class Scheduler:
       targetCard.isLimitBuy = false;
       mainComp.data.selectCardData = targetCard;
 
+      // 3.5 先找到 PayComponent，直接注入 productId（Vue prop 绑定不会自动同步 $data 直改）
+      let productId = null;
+      walkVueTree(mainComp.vm, mainComp.ver, 0, (vm, ver) => {
+        if (productId) return;
+        const data = getVMData(vm, ver);
+        // PayComponent 有 captchaVerified 字段
+        if ('captchaVerified' in data && data.cardData) {
+          if (data.cardData.productId) productId = data.cardData.productId;
+          else {
+            data.cardData.productId = targetCard.productId;
+            productId = targetCard.productId;
+          }
+        }
+      });
+
       // 4. 找支付组件并设置 payDialogVisible=true
       let payComp = null;
-      // 先尝试 $refs.payComponentRef
       const refs = (mainComp.ver === 2) ? mainComp.vm.$refs : ((mainComp.vm.proxy || mainComp.vm).$refs);
       if (refs && refs.payComponentRef) {
         payComp = refs.payComponentRef;
       }
-      // 回退：遍历找带 payDialogVisible 的组件
       if (!payComp) {
         walkVueTree(mainComp.vm, mainComp.ver, 0, (vm, ver) => {
           if (payComp) return;
@@ -756,6 +933,7 @@ class Scheduler:
     # 尝试 batch-preview
     logger.info("[主动获取] 尝试直接调用产品列表 API...")
     data = self.api_client.batch_preview()
+    logger.info(f"/batch-preview 返回：{data}")
     if data:
       self.product_mgr.capture_product_id_from_data(
           data.get("data", data),  # 兼容 data 嵌套
@@ -897,6 +1075,7 @@ class Scheduler:
       self._order_created = False
       self._confirmed_sold_out = False
       self._is_running = False
+      self._pay_dialog_triggered = False
 
     if (
         self._is_running
@@ -910,11 +1089,10 @@ class Scheduler:
     if await self.dom.has_error():
       return  # 页面仍有错误
 
-    # 检查页面是否有可用的购买按钮
-    if await self.dom.has_any_purchase_button():
-      logger.info("页面恢复正常，自动触发抢购!")
-      self._is_running = True
-      await self._start_snipe()
+    # 页面就绪则自动触发抢购（走 Vue 操作，不依赖购买按钮）
+    logger.info("页面恢复正常，自动触发抢购!")
+    self._is_running = True
+    await self._start_snipe()
 
   # ==================== 主入口 ====================
 
@@ -965,7 +1143,7 @@ class Scheduler:
 
     # 6. 如果当前已经在抢购窗口内，等 page logo 就绪后 0.3s 再开始
     if self._is_in_purchase_time():
-      await asyncio.sleep(1.5)  # 等待页面数据加载
+      await asyncio.sleep(2)  # 等待页面数据加载
       if not self._confirmed_sold_out:
         logger.info("当前正是抢购时间! 立即开始!")
         self._is_running = True
@@ -973,13 +1151,14 @@ class Scheduler:
         if self._order_created:
           return  # 抢购成功 → 退出，main.py 保持浏览器打开等待扫码
         # 失败：等页面恢复后重新触发
+        self._skip_countdown = True  # 跳过倒计时，直接进 maintenance
         for _ in range(15):  # 最多等 30 秒
           await asyncio.sleep(2)
           await self.auto_recovery_check()
           await self.auto_snipe_on_ready()
           if self._order_created or self._is_running:
             break
-        return
+        # 不 return，继续进入主循环以支持手动刷新页面重新抢购
 
     # 7. 打印配置信息
     plan_list = "，".join(

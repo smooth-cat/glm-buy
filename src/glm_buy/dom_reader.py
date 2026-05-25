@@ -85,6 +85,16 @@ class DOMReader:
     url = self._page.url
     return "rate-limit" in url
 
+  async def has_rush_limit_text(self) -> bool:
+    """检查页面是否出现"抢购人数过多"（抢购限流提示）."""
+    try:
+      # 全文搜索比 text= 选择器更可靠，不受弹窗渲染延迟影响
+      text = await self._page.inner_text("body") or ""
+      # 只匹配"抢购人数过多"（按钮上的限流文案），不能匹配"购买人数较多"（支付弹窗中的购买提醒）
+      return "抢购人数" in text
+    except Exception:
+      return False
+
   async def is_page_blank(self) -> bool:
     """
     检查页面是否为空（HTML 加载失败）.

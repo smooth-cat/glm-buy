@@ -1,0 +1,245 @@
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": {
+    "productList": [
+      {
+        "productId": "product-b8ea38",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 147.0,
+        "discountAmount": 132.3,
+        "payAmount": 132.3,
+        "monthlyOriginalAmount": 49.0,
+        "monthlyRenewAmount": 44.1,
+        "monthlyPayAmount": 44.1,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [
+          {
+            "campaignName": "连续包季 9 折",
+            "campaignDiscountAmount": 14.7,
+            "rewardMode": "PERCENT",
+            "rewardAmount": 10.0,
+            "rewardDetail": "连续包季 9 折",
+            "applyScene": "REGULAR_DISCOUNT"
+          }
+        ],
+        "renewAmount": 132.3,
+        "forbidden": false
+      },
+      {
+        "productId": "product-2fc421",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 469.0,
+        "discountAmount": 469.0,
+        "payAmount": 469.0,
+        "monthlyOriginalAmount": 469.0,
+        "monthlyRenewAmount": 469.0,
+        "monthlyPayAmount": 469.0,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [],
+        "renewAmount": 469.0,
+        "forbidden": false
+      },
+      {
+        "productId": "product-fef82f",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 447.0,
+        "discountAmount": 402.3,
+        "payAmount": 402.3,
+        "monthlyOriginalAmount": 149.0,
+        "monthlyRenewAmount": 134.1,
+        "monthlyPayAmount": 134.1,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [
+          {
+            "campaignName": "连续包季 9 折",
+            "campaignDiscountAmount": 44.7,
+            "rewardMode": "PERCENT",
+            "rewardAmount": 10.0,
+            "rewardDetail": "连续包季 9 折",
+            "applyScene": "REGULAR_DISCOUNT"
+          }
+        ],
+        "renewAmount": 402.3,
+        "forbidden": false
+      },
+      {
+        "productId": "product-70a804",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 588.0,
+        "discountAmount": 470.4,
+        "payAmount": 470.4,
+        "monthlyOriginalAmount": 49.0,
+        "monthlyRenewAmount": 39.2,
+        "monthlyPayAmount": 39.2,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [
+          {
+            "campaignName": "连续包年 8 折",
+            "campaignDiscountAmount": 117.6,
+            "rewardMode": "PERCENT",
+            "rewardAmount": 20.0,
+            "rewardDetail": "连续包年 8 折",
+            "applyScene": "REGULAR_DISCOUNT"
+          }
+        ],
+        "renewAmount": 470.4,
+        "forbidden": false
+      },
+      {
+        "productId": "product-5643e6",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 1788.0,
+        "discountAmount": 1430.4,
+        "payAmount": 1430.4,
+        "monthlyOriginalAmount": 149.0,
+        "monthlyRenewAmount": 119.2,
+        "monthlyPayAmount": 119.2,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [
+          {
+            "campaignName": "连续包年 8 折",
+            "campaignDiscountAmount": 357.6,
+            "rewardMode": "PERCENT",
+            "rewardAmount": 20.0,
+            "rewardDetail": "连续包年 8 折",
+            "applyScene": "REGULAR_DISCOUNT"
+          }
+        ],
+        "renewAmount": 1430.4,
+        "forbidden": false
+      },
+      {
+        "productId": "product-02434c",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 49.0,
+        "discountAmount": 49.0,
+        "payAmount": 49.0,
+        "monthlyOriginalAmount": 49.0,
+        "monthlyRenewAmount": 49.0,
+        "monthlyPayAmount": 49.0,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [],
+        "renewAmount": 49.0,
+        "forbidden": false
+      },
+      {
+        "productId": "product-d46f8b",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 5628.0,
+        "discountAmount": 4502.4,
+        "payAmount": 4502.4,
+        "monthlyOriginalAmount": 469.0,
+        "monthlyRenewAmount": 375.2,
+        "monthlyPayAmount": 375.2,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [
+          {
+            "campaignName": "连续包年 8 折",
+            "campaignDiscountAmount": 1125.6,
+            "rewardMode": "PERCENT",
+            "rewardAmount": 20.0,
+            "rewardDetail": "连续包年 8 折",
+            "applyScene": "REGULAR_DISCOUNT"
+          }
+        ],
+        "renewAmount": 4502.4,
+        "forbidden": false
+      },
+      {
+        "productId": "product-1df3e1",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 149.0,
+        "discountAmount": 149.0,
+        "payAmount": 149.0,
+        "monthlyOriginalAmount": 149.0,
+        "monthlyRenewAmount": 149.0,
+        "monthlyPayAmount": 149.0,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [],
+        "renewAmount": 149.0,
+        "forbidden": false
+      },
+      {
+        "productId": "product-5d3a03",
+        "inCurrentPeriod": false,
+        "lastValid": false,
+        "effectiveTime": null,
+        "originalAmount": 1407.0,
+        "discountAmount": 1266.3,
+        "payAmount": 1266.3,
+        "monthlyOriginalAmount": 469.0,
+        "monthlyRenewAmount": 422.1,
+        "monthlyPayAmount": 422.1,
+        "canPurchase": null,
+        "soldOut": true,
+        "hasFirstTimeSubscriptionPromo": false,
+        "delay": false,
+        "canRepurchase": null,
+        "campaignDiscountDetails": [
+          {
+            "campaignName": "连续包季 9 折",
+            "campaignDiscountAmount": 140.7,
+            "rewardMode": "PERCENT",
+            "rewardAmount": 10.0,
+            "rewardDetail": "连续包季 9 折",
+            "applyScene": "REGULAR_DISCOUNT"
+          }
+        ],
+        "renewAmount": 1266.3,
+        "forbidden": false
+      }
+    ],
+    "isSubscribed": false,
+    "isAuthenticated": null
+  },
+  "success": true
+}
